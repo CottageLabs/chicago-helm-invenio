@@ -13,7 +13,10 @@ metadata:
 {{/*    "helm.sh/hook-delete-policy": hook-succeeded*/}}
 {{- $cmd := "invenio db init && invenio db create && invenio index init && invenio index queue init purge && invenio files location --default 'default-location'  $(invenio shell --no-term-title -c \"print(app.instance_path)\")'/data' && invenio roles create admin && invenio access allow superuser-access role admin" -}}
 {{- range $usr, $pass := .Values.invenio.default_users -}}
-  {{- $cmd = printf "%s && invenio users create --active --password=%s %s" $cmd $pass $usr -}}
+  {{- $cmd = printf "%s && invenio users create --active --confirm --password=%s %s" $cmd $pass $usr -}}
+{{- end -}}
+{{- if .Values.invenio.sysadmin.email -}}
+  {{- $cmd = printf "%s && invenio users create --active --confirm --password=$INVENIO_SYSADMIN_PASSWORD %s && invenio roles add %s admin" $cmd .Values.invenio.sysadmin.email .Values.invenio.sysadmin.email -}}
 {{- end -}}
 {{- if and .Values.invenio.demo_data .Values.invenio.default_users -}}
   {{- $cmd = cat $cmd "&& invenio rdm-records demo" -}}
@@ -41,6 +44,13 @@ spec:
           value: {{ required "Missing .Values.global.timezone" .Values.global.timezone }}
         {{- include "invenio.config.queue" . | nindent 8 }}
         {{- include "invenio.config.database" . | nindent 8 }}
+        {{- if .Values.invenio.sysadmin.email }}
+        - name: INVENIO_SYSADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ required "Missing .Values.invenio.sysadmin.passwordSecret" .Values.invenio.sysadmin.passwordSecret }}
+              key: {{ .Values.invenio.sysadmin.passwordSecretKey | default "password" }}
+        {{- end }}
         {{- with .Values.invenio.extraEnvVars }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

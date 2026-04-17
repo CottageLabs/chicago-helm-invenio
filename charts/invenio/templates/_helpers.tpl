@@ -249,7 +249,7 @@ Return the proper Invenio image name
 */}}
 {{- define "invenio.opensearch.hostname" -}}
   {{- if .Values.opensearch.enabled }}
-    {{- include "opensearch.service.name" .Subcharts.opensearch -}}
+    {{- printf "%s-opensearch-master" .Release.Name -}}
   {{- else }}
     {{- required "Missing .Values.opensearchExternal.hostname" .Values.opensearchExternal.hostname -}}
   {{- end }}
@@ -399,7 +399,7 @@ INVENIO_CELERY_RESULT_BACKEND: 'redis://{{ include "invenio.redis.hostname" . }}
 INVENIO_IIIF_CACHE_REDIS_URL: 'redis://{{ include "invenio.redis.hostname" . }}:6379/0'
 INVENIO_RATELIMIT_STORAGE_URI: 'redis://{{ include "invenio.redis.hostname" . }}:6379/3'
 INVENIO_COMMUNITIES_IDENTITIES_CACHE_REDIS_URL: 'redis://{{ include "invenio.redis.hostname" . }}:6379/4'
-INVENIO_SEARCH_HOSTS: {{ printf "[{'host': '%s'}]" (include "invenio.opensearch.hostname" .) | quote }}
+INVENIO_SEARCH_HOSTS: {{ printf "[{'host': '%s', 'port': 9200}]" (include "invenio.opensearch.hostname" .) | quote }}
 INVENIO_SITE_HOSTNAME: '{{ include "invenio.hostname" $ }}'
 INVENIO_SITE_UI_URL: 'https://{{ include "invenio.hostname" $ }}'
 INVENIO_SITE_API_URL: 'https://{{ include "invenio.hostname" $ }}/api'

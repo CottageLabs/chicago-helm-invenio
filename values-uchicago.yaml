@@ -24,6 +24,9 @@ ingress:
 invenio:
   hostname: uchicago.cottagelabs.com
   init: false
+  sysadmin:
+    email: sysadmin@cottagelabs.com
+    passwordSecret: invenio-sysadmin-secret
 
 persistence:
   enabled: true

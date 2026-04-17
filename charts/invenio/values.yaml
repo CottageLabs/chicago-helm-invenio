@@ -105,6 +105,12 @@ invenio:
   ## @param invenio.demo_data
   ## Setting invenio.demo_data=true requires also setting default_users!
   demo_data: false
+  ## @param invenio.sysadmin Local system admin user created during init.
+  ## Password is read from a Kubernetes secret — never put it in a values file.
+  sysadmin:
+    email: ""
+    passwordSecret: ""
+    passwordSecretKey: password
 
   sentry:
     ## @param invenio.sentry.enabled Enable Sentry.io integration
@@ -1254,23 +1260,21 @@ postgresqlExternal: {}
   # existingSecretPasswordKey: "password"
 
 ## @section Opensearch chart configuration
-## ref: https://github.com/bitnami/charts/blob/main/bitnami/opensearch/values.yaml
+## ref: https://github.com/opensearch-project/helm-charts
 ## @param opensearch.enabled Switch to enable or disable the Opensearch helm chart
 opensearch:
   enabled: true
-  dashboards:
-    image:
-      ## @param opensearch.dashboards.image.repository Sets bitnamilegacy by default
-      ##
-      repository: bitnamilegacy/opensearch-dashboards
-  image:
-    ## @param opensearch.image.repository Sets bitnamilegacy by default
-    ##
-    repository: bitnamilegacy/opensearch  # Work-around until we've migrated away from Bitnami.
-  sysctlImage:
-    ## @param opensearch.sysctlImage.repository Sets bitnamilegacy by default
-    ##
-    repository: bitnamilegacy/os-shell  # Work-around until we've migrated away from Bitnami.
+  clusterName: invenio-opensearch
+  nodeGroup: master
+  masterService: invenio-opensearch-master
+  config:
+    opensearch.yml: |
+      cluster.name: invenio-opensearch
+      network.host: 0.0.0.0
+      # FIXME: re-enable security and configure TLS/auth
+      plugins:
+        security:
+          disabled: true
 
 ## @param externalOpensearch External Opensearch configuration
 ## All of these values are only used when opensearch.enabled is set to false

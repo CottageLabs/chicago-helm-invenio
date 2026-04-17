@@ -1,6 +1,6 @@
 apiVersion: v2
 name: invenio
-appVersion: 12.0.10
+appVersion: 13.0.9
 description: Turn-key research data management platform.
 home: https://inveniosoftware.org/
 icon: https://inveniosoftware.org/static/img/logo-invenio-white.svg
@@ -16,11 +16,13 @@ version: 0.11.1
 maintainers:
   - name: CERN
     email: info@inveniosoftware.org
+  - name: Cottage Labs
+    email: sysadmin@cottagelabs.com
 dependencies:
   - name: opensearch
     condition: opensearch.enabled
-    repository: "oci://registry-1.docker.io/bitnamicharts"
-    version: "1.4.0"
+    repository: "https://opensearch-project.github.io/helm-charts"
+    version: "2.30.1"
   - name: postgresql
     condition: postgresql.enabled
     repository: "oci://registry-1.docker.io/bitnamicharts"
