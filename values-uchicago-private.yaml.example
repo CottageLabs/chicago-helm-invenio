@@ -1,0 +1,10 @@
+## Account-specific values for uchicago.cottagelabs.com.
+## Copy this file to values-uchicago-private.yaml (gitignored) and fill in your values.
+## See docs/aws-setup.md for how to obtain these.
+
+image:
+  registry: <aws-account-id>.dkr.ecr.us-east-2.amazonaws.com
+
+ingress:
+  annotations:
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-2:<aws-account-id>:certificate/<cert-id>

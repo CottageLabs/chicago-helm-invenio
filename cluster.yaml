@@ -1,0 +1,30 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: chicago-invenio
+  region: us-east-2
+  version: "1.32"
+  tags:
+    project: chicago-invenio
+
+managedNodeGroups:
+  - name: workers
+    instanceType: t3.xlarge
+    minSize: 2
+    maxSize: 4
+    desiredCapacity: 2
+    volumeSize: 50
+    tags:
+      project: chicago-invenio
+      Name: chicago-invenio-workers
+    iam:
+      withAddonPolicies:
+        ebs: true
+        albIngress: true
+
+addons:
+  - name: vpc-cni
+  - name: coredns
+  - name: kube-proxy
+  - name: aws-ebs-csi-driver

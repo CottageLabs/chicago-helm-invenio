@@ -1,0 +1,25 @@
+## gp3 is the default storage class for EBS volumes (used by postgresql, redis, etc.)
+## It replaces the EKS-managed gp2 as default: cheaper, faster, no extra cost.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp3
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: ebs.csi.aws.com
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+parameters:
+  type: gp3
+---
+## EFS storage class for the Invenio shared volume (ReadWriteMany).
+## Requires the EFS filesystem ID to be set - see aws-setup.md.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: efs
+provisioner: efs.csi.aws.com
+parameters:
+  provisioningMode: efs-ap
+  fileSystemId: fs-0e8f6bacbcc4515bf
+  directoryPerms: "700"

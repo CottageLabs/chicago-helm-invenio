@@ -1,3 +1,4 @@
 .deploy
 .idea
 /charts/*/charts/
+values-*-private.yaml

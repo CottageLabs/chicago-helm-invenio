@@ -1,0 +1,85 @@
+## Chicago / UChicago deployment values
+## Target: uchicago.cottagelabs.com
+## Cluster: chicago-invenio (us-east-2)
+
+global:
+  timezone: "America/Chicago"
+
+## ECR registry and certificate ARN are in values-uchicago-private.yaml (gitignored).
+image:
+  repository: chicago-invenio
+  tag: "latest"
+  pullPolicy: Always
+
+ingress:
+  enabled: true
+  class: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    alb.ingress.kubernetes.io/tags: project=chicago-invenio
+
+invenio:
+  hostname: uchicago.cottagelabs.com
+  init: false
+
+persistence:
+  enabled: true
+  storage_class: efs
+  access_mode: ReadWriteMany
+  size: 500G
+
+web:
+  replicas: 2
+  uwsgi:
+    processes: 2
+    threads: 2
+  extraVolumes:
+    - name: basic-auth
+      secret:
+        secretName: invenio-basic-auth
+
+worker:
+  replicas: 2
+  concurrency: 2
+
+flower:
+  enabled: false
+
+nginx:
+  # Basic auth is enabled for pre-production. Credentials are stored in the
+  # invenio-basic-auth Kubernetes secret (not in this file).
+  extraVolumeMounts:
+    - name: basic-auth
+      mountPath: /etc/nginx/auth
+      readOnly: true
+  extraServerConfig: |
+    auth_basic "Restricted";
+    auth_basic_user_file /etc/nginx/auth/htpasswd;
+
+## All dependencies run in-cluster for now
+postgresql:
+  enabled: true
+  auth:
+    username: invenio
+    database: invenio
+    existingSecret: invenio-db-secret
+    secretKeys:
+      adminPasswordKey: password
+      userPasswordKey: password
+
+redis:
+  enabled: true
+  # FIXME: auth is disabled (chart default). Enable redis.auth.enabled=true with a
+  # password secret before moving to production, or migrate to AWS ElastiCache.
+
+rabbitmq:
+  enabled: true
+  auth:
+    existingPasswordSecret: invenio-mq-secret
+    existingSecretPasswordKey: password
+
+opensearch:
+  enabled: true

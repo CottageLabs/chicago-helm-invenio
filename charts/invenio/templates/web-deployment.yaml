@@ -163,6 +163,9 @@ spec:
         - name: nginx-invenio-assets
           mountPath: "{{ .Values.nginx.assets.location }}"
           readOnly: true
+        {{- with .Values.nginx.extraVolumeMounts }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         readinessProbe:
           httpGet:
             path: /ping
