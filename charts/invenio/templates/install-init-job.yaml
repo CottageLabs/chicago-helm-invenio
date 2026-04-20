@@ -11,7 +11,7 @@ metadata:
     "helm.sh/hook": post-install
     "helm.sh/hook-weight": "1"
 {{/*    "helm.sh/hook-delete-policy": hook-succeeded*/}}
-{{- $cmd := "invenio db init && invenio db create && invenio index init && invenio index queue init purge && invenio files location --default 'default-location'  $(invenio shell --no-term-title -c \"print(app.instance_path)\")'/data' && invenio roles create admin && invenio access allow superuser-access role admin" -}}
+{{- $cmd := "invenio db init && invenio db create && invenio index init && invenio index queue init purge && invenio files location --default 'default-location'  $(invenio shell --no-term-title -c \"print(app.instance_path)\")'/data' && invenio roles create admin && invenio access allow superuser-access role admin && invenio rdm-records fixtures" -}}
 {{- range $usr, $pass := .Values.invenio.default_users -}}
   {{- $cmd = printf "%s && invenio users create --active --confirm --password=%s %s" $cmd $pass $usr -}}
 {{- end -}}

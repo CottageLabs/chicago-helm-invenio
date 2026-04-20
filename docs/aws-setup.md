@@ -428,6 +428,88 @@ kubectl patch storageclass gp2 \
 
 ---
 
+## External DNS
+
+External DNS automatically keeps the Route 53 alias record in sync with the
+ALB address. This means teardown and reinstall require no manual DNS updates.
+
+### 1. Create the IAM role
+
+```bash
+AWS_PROFILE=<your-profile> aws iam create-policy \
+  --policy-name chicago-invenio-external-dns-policy \
+  --tags Key=project,Value=chicago-invenio \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": ["route53:ChangeResourceRecordSets", "route53:ListTagsForResource"],
+        "Resource": "arn:aws:route53:::hostedzone/*"
+      },
+      {
+        "Effect": "Allow",
+        "Action": ["route53:ListHostedZones", "route53:ListResourceRecordSets"],
+        "Resource": "*"
+      }
+    ]
+  }'
+
+AWS_ACCOUNT=$(AWS_PROFILE=<your-profile> aws sts get-caller-identity --query Account --output text)
+
+AWS_PROFILE=<your-profile> aws iam create-role \
+  --role-name chicago-invenio-external-dns-role \
+  --tags Key=project,Value=chicago-invenio \
+  --assume-role-policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Principal": {"Service": "pods.eks.amazonaws.com"},
+      "Action": ["sts:AssumeRole", "sts:TagSession"]
+    }]
+  }'
+
+AWS_PROFILE=<your-profile> aws iam attach-role-policy \
+  --role-name chicago-invenio-external-dns-role \
+  --policy-arn arn:aws:iam::${AWS_ACCOUNT}:policy/chicago-invenio-external-dns-policy
+```
+
+### 2. Create the service account and pod identity association
+
+```bash
+kubectl create serviceaccount external-dns -n kube-system
+
+AWS_PROFILE=<your-profile> aws eks create-pod-identity-association \
+  --cluster-name chicago-invenio \
+  --region us-east-2 \
+  --namespace kube-system \
+  --service-account external-dns \
+  --role-arn arn:aws:iam::${AWS_ACCOUNT}:role/chicago-invenio-external-dns-role
+```
+
+### 3. Install via Helm
+
+```bash
+helm repo add external-dns https://kubernetes-sigs.github.io/external-dns/ && helm repo update external-dns
+
+helm install external-dns external-dns/external-dns \
+  -n kube-system \
+  --set provider.name=aws \
+  --set "env[0].name=AWS_DEFAULT_REGION" \
+  --set "env[0].value=us-east-2" \
+  --set policy=upsert-only \
+  --set registry=txt \
+  --set txtOwnerId=chicago-invenio \
+  --set "domainFilters[0]=uchicago.cottagelabs.com" \
+  --set serviceAccount.create=false \
+  --set serviceAccount.name=external-dns
+```
+
+External DNS reconciles every minute. After a reinstall, the Route 53 record
+will update automatically once the new ALB is assigned to the ingress.
+
+---
+
 ## Deploy Invenio
 
 ### 1. Create the namespace and secrets
