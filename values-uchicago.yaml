@@ -27,6 +27,21 @@ invenio:
   sysadmin:
     email: sysadmin@cottagelabs.com
     passwordSecret: invenio-sysadmin-secret
+  datacite:
+    enabled: true
+    existingSecret: invenio-datacite-secret
+    secretKeys:
+      usernameKey: DATACITE_USERNAME
+      passwordKey: DATACITE_PASSWORD
+  extraEnvVars:
+    - name: CHI_ENABLE_CURATIONS
+      value: "true"
+  extraEnvFrom:
+    - secretRef:
+      name: invenio-mail-secret
+    - secretRef:
+      name: invenio-oauth-secret
+
 
 persistence:
   enabled: true
