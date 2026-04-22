@@ -29,6 +29,8 @@ invenio:
     passwordSecret: invenio-sysadmin-secret
   datacite:
     enabled: true
+    prefix: "10.70047"
+    testMode: true
     existingSecret: invenio-datacite-secret
     secretKeys:
       usernameKey: DATACITE_USERNAME
@@ -38,9 +40,9 @@ invenio:
       value: "true"
   extraEnvFrom:
     - secretRef:
-      name: invenio-mail-secret
+        name: invenio-mail-secret
     - secretRef:
-      name: invenio-oauth-secret
+        name: invenio-oauth-secret
 
 persistence:
   enabled: true
@@ -49,12 +51,12 @@ persistence:
   size: 500G
 
 terminal:
-   enabled: true
-   replicas: 0
-   extraVolumeMounts:
-     - name: shared-volume
-       mountPath: /opt/invenio/var/instance/import-data
-       subPath: import-data
+  enabled: true
+  replicas: 0
+  extraVolumeMounts:
+    - name: shared-volume
+      mountPath: /opt/invenio/var/instance/import-data
+      subPath: import-data
 
 
 web:
