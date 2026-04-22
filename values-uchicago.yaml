@@ -42,12 +42,20 @@ invenio:
     - secretRef:
       name: invenio-oauth-secret
 
-
 persistence:
   enabled: true
   storage_class: efs
   access_mode: ReadWriteMany
   size: 500G
+
+terminal:
+   enabled: true
+   replicas: 0
+   extraVolumeMounts:
+     - name: shared-volume
+       mountPath: /opt/invenio/var/instance/import-data
+       subPath: import-data
+
 
 web:
   replicas: 2
