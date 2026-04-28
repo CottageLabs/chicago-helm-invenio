@@ -651,6 +651,8 @@ worker:
         - "celery -A {{ .Values.worker.app }} inspect ping -d celery@$(hostname)"
     initialDelaySeconds: 20
     timeoutSeconds: 30
+    periodSeconds: 60
+    failureThreshold: 3
   ## @param worker.readinessProbe templated `readinessProbe` for the worker container
   ##
   readinessProbe: null
@@ -785,9 +787,11 @@ workerBeat:
       command:
         - /bin/bash
         - -c
-        - "celery -A {{ .Values.worker.app }} inspect ping"
+        - "test -f {{ .Values.worker.celery_pidfile }} && kill -0 $(cat {{ .Values.worker.celery_pidfile }})"
     initialDelaySeconds: 20
-    timeoutSeconds: 30
+    timeoutSeconds: 5
+    periodSeconds: 30
+    failureThreshold: 3
   ## @param workerBeat.readinessProbe templated `readinessProbe` for the worker-beat container
   ##
   readinessProbe: null
