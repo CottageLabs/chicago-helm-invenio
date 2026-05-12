@@ -23,7 +23,7 @@ ingress:
 
 invenio:
   hostname: uchicago.cottagelabs.com
-  init: false
+  init: true
   sysadmin:
     email: sysadmin@cottagelabs.com
     passwordSecret: invenio-sysadmin-secret
@@ -112,8 +112,8 @@ rabbitmqExternal:
   managementPort: 15672
   protocol: amqp
   vhost: ""
-  username: ""  # set in values-uchicago-private.yaml (retrieved from invenio-mq-default-user secret)
-  existingSecret: invenio-mq-default-user
+  username: invenio
+  existingSecret: invenio-mq-secret
   existingSecretPasswordKey: password
 
 opensearch:

@@ -73,44 +73,10 @@ AWS_PROFILE=<your-profile> aws route53 create-hosted-zone \
 Note the four NS records returned and add them as NS records for `uchicago`
 in GoDaddy. All DNS under `uchicago.cottagelabs.com` is then managed in Route 53.
 
-### Add ALB alias record once deployed
-
-Once the Invenio ingress has an ALB address:
-
-```bash
-kubectl get ingress invenio -n invenio
-```
-
-Because `uchicago.cottagelabs.com` is the zone apex, a CNAME is not permitted.
-Use a Route 53 **ALIAS A record** instead:
-
-```bash
-ALB_HOSTNAME=<alb-hostname-from-above>
-ZONE_ID=<route53-zone-id>
-
-# Get the ALB's hosted zone ID
-ALB_ZONE=$(AWS_PROFILE=<your-profile> aws elbv2 describe-load-balancers \
-  --region us-east-2 \
-  --query "LoadBalancers[?DNSName=='${ALB_HOSTNAME}'].CanonicalHostedZoneId" \
-  --output text)
-
-AWS_PROFILE=<your-profile> aws route53 change-resource-record-sets \
-  --hosted-zone-id ${ZONE_ID} \
-  --change-batch "{
-    \"Changes\": [{
-      \"Action\": \"CREATE\",
-      \"ResourceRecordSet\": {
-        \"Name\": \"uchicago.cottagelabs.com.\",
-        \"Type\": \"A\",
-        \"AliasTarget\": {
-          \"HostedZoneId\": \"${ALB_ZONE}\",
-          \"DNSName\": \"${ALB_HOSTNAME}\",
-          \"EvaluateTargetHealth\": true
-        }
-      }
-    }]
-  }"
-```
+> **Do not** manually create an A record for `uchicago.cottagelabs.com` — External
+> DNS (installed below) will create and manage it automatically after the first
+> `helm install`. A manually created record will not have TXT ownership and
+> External DNS will not update it when the ALB changes.
 
 ---
 
@@ -443,7 +409,7 @@ VPC_ID=$(AWS_PROFILE=<your-profile> aws eks describe-cluster \
   --query 'cluster.resourcesVpcConfig.vpcId' --output text)
 
 NODE_SG=$(AWS_PROFILE=<your-profile> aws ec2 describe-security-groups \
-  --filters "Name=vpc-id,Values=${VPC_ID}" "Name=group-name,Values=eksctl-chicago-invenio-cluster-ClusterSharedNodeSecurityGroup-*" \
+  --filters "Name=vpc-id,Values=${VPC_ID}" "Name=group-name,Values=eks-cluster-sg-chicago-invenio-*" \
   --query 'SecurityGroups[0].GroupId' --output text --region us-east-2)
 
 RDS_SG=$(AWS_PROFILE=<your-profile> aws ec2 create-security-group \
@@ -548,7 +514,7 @@ VPC_ID=$(AWS_PROFILE=<your-profile> aws eks describe-cluster \
   --query 'cluster.resourcesVpcConfig.vpcId' --output text)
 
 NODE_SG=$(AWS_PROFILE=<your-profile> aws ec2 describe-security-groups \
-  --filters "Name=vpc-id,Values=${VPC_ID}" "Name=group-name,Values=eksctl-chicago-invenio-cluster-ClusterSharedNodeSecurityGroup-*" \
+  --filters "Name=vpc-id,Values=${VPC_ID}" "Name=group-name,Values=eks-cluster-sg-chicago-invenio-*" \
   --query 'SecurityGroups[0].GroupId' --output text --region us-east-2)
 
 REDIS_SG=$(AWS_PROFILE=<your-profile> aws ec2 create-security-group \
@@ -618,17 +584,49 @@ rather than the in-cluster Bitnami subchart. The operator creates and manages th
 `invenio-mq` cluster and automatically provisions the connection secret
 `invenio-mq-default-user` in the same namespace.
 
-### 1. Install the cluster operator
+### 1. Install the operators
+
+The cluster operator manages `RabbitmqCluster` resources. The messaging topology
+operator (with cert-manager) manages `User` and `Permission` resources.
 
 ```bash
+# cert-manager (required by the topology operator)
+helm install cert-manager jetstack/cert-manager \
+  --namespace cert-manager --create-namespace \
+  --set crds.enabled=true
+
+kubectl wait --for=condition=Available deployment/cert-manager-webhook \
+  -n cert-manager --timeout=120s
+
+# RabbitMQ Cluster Operator
 helm repo add rabbitmq-operator https://rabbitmq.github.io/rabbitmq-operator && \
   helm repo update rabbitmq-operator
 
 helm install rabbitmq-operator rabbitmq-operator/rabbitmq-cluster-operator \
   -n rabbitmq-system --create-namespace
+
+# RabbitMQ Messaging Topology Operator
+kubectl apply -f https://github.com/rabbitmq/messaging-topology-operator/releases/latest/download/messaging-topology-operator-with-certmanager.yaml
+
+kubectl wait --for=condition=Available deployment/messaging-topology-operator \
+  -n rabbitmq-system --timeout=120s
 ```
 
-### 2. Deploy the RabbitMQ cluster
+### 2. Create the credentials secret
+
+The `User` CR imports credentials from `invenio-mq-secret`, which must exist before
+applying the manifest. Create it with a strong password:
+
+```bash
+kubectl create secret generic invenio-mq-secret \
+  --from-literal=username=invenio \
+  --from-literal=password="<strong-password>" \
+  --namespace invenio
+```
+
+> Store this password in your password manager.
+
+### 3. Deploy the RabbitMQ cluster
 
 ```bash
 kubectl apply -f k8s/rabbitmq.yaml
@@ -641,19 +639,8 @@ kubectl wait rabbitmqcluster invenio-mq -n invenio \
   --for=condition=AllReplicasReady --timeout=300s
 ```
 
-The operator creates the secret `invenio-mq-default-user` in the `invenio` namespace
-with `username` and `password` keys. No manual secret creation is required.
-
-### 3. Get the username and update values-uchicago-private.yaml
-
-The operator generates a random username. Retrieve it and add it to your private values:
-
-```bash
-kubectl get secret invenio-mq-default-user -n invenio \
-  -o jsonpath='{.data.username}' | base64 -d
-```
-
-Update `rabbitmqExternal.username` in `values-uchicago-private.yaml` with this value.
+Invenio connects as user `invenio` using the password from `invenio-mq-secret`. No further
+credential lookup is needed.
 
 ---
 
@@ -758,6 +745,9 @@ Then create the namespace and remaining secrets:
 
 ```bash
 kubectl create namespace invenio
+
+# invenio-db-secret and invenio-mq-secret are created in the RDS and RabbitMQ
+# sections above — ensure those steps are complete before continuing.
 
 # Basic auth (pre-production only — remove nginx.extraVolumeMounts,
 # nginx.extraServerConfig, and web.extraVolumes from values-uchicago.yaml

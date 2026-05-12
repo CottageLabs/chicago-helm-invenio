@@ -15,5 +15,3 @@ postgresqlExternal:
 redisExternal:
   hostname: <elasticache-endpoint>  # ElastiCache section, step 4
 
-rabbitmqExternal:
-  username: <operator-username>  # RabbitMQ section, step 3
