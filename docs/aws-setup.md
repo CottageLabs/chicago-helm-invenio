@@ -580,9 +580,10 @@ Update `redisExternal.hostname` in `values-uchicago-private.yaml` with this valu
 ## RabbitMQ (Cluster Operator)
 
 Invenio uses a RabbitMQ instance deployed via the [RabbitMQ Cluster Operator](https://www.rabbitmq.com/kubernetes/operator/operator-overview)
-rather than the in-cluster Bitnami subchart. The operator creates and manages the
-`invenio-mq` cluster and automatically provisions the connection secret
-`invenio-mq-default-user` in the same namespace.
+rather than the in-cluster Bitnami subchart. Unlike RDS and ElastiCache, this is
+not an external AWS service — it runs entirely within EKS. The operator runs in
+`rabbitmq-system` and manages `RabbitmqCluster` resources; the cluster itself runs
+in the `invenio` namespace alongside the application.
 
 ### 1. Install the operators
 
@@ -731,7 +732,7 @@ will update automatically once the new ALB is assigned to the ingress.
 ### 1. Create the namespace and secrets
 
 Before deploying, complete the RDS, ElastiCache, and RabbitMQ sections above — they
-create the required secrets (`invenio-db-secret`, `invenio-mq-default-user`) and provide
+create the required secrets (`invenio-db-secret`, `invenio-mq-secret`) and provide
 the values needed in `values-uchicago-private.yaml`.
 
 Copy the example and fill in your values:
@@ -748,6 +749,11 @@ kubectl create namespace invenio
 
 # invenio-db-secret and invenio-mq-secret are created in the RDS and RabbitMQ
 # sections above — ensure those steps are complete before continuing.
+
+# Sysadmin user password (used by the init job to create the admin account)
+kubectl create secret generic invenio-sysadmin-secret \
+  --from-literal=password="<strong-password>" \
+  --namespace invenio
 
 # Basic auth (pre-production only — remove nginx.extraVolumeMounts,
 # nginx.extraServerConfig, and web.extraVolumes from values-uchicago.yaml
