@@ -8,7 +8,7 @@ global:
 ## ECR registry and certificate ARN are in values-uchicago-private.yaml (gitignored).
 image:
   repository: chicago-invenio
-  tag: "latest"
+  tag: "14f8471dbec1471da19e718d6ca980cd8a7d0f8f"
   pullPolicy: Always
 
 ingress:
