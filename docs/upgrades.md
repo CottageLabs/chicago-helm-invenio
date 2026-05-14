@@ -78,6 +78,57 @@ helm rollback invenio -n invenio
 
 ---
 
+## Reinstalling from scratch
+
+Use this procedure when you need a clean reinstall (e.g. after a failed initial
+deployment) without losing persistent data in RDS or EFS.
+
+### What persists across a reinstall
+
+| Resource | Why |
+|---|---|
+| RDS database | External to the chart; not touched by `helm uninstall` |
+| EFS shared volume (`shared-volume` PVC) | `helm.sh/resource-policy: keep` annotation |
+| Invenio secret (salts) | `helm.sh/resource-policy: keep` annotation |
+| RabbitMQ PVC | Managed by the cluster operator, not the Helm chart |
+
+OpenSearch PVCs are **not** kept and must be deleted manually — see below.
+
+### Procedure
+
+```bash
+helm uninstall invenio -n invenio
+
+# Delete OpenSearch PVCs (data is rebuilt by the init job)
+kubectl delete pvc \
+  invenio-opensearch-master-invenio-opensearch-master-0 \
+  invenio-opensearch-master-invenio-opensearch-master-1 \
+  invenio-opensearch-master-invenio-opensearch-master-2 \
+  -n invenio
+
+helm install invenio charts/invenio \
+  --namespace invenio \
+  --values values-uchicago.yaml \
+  --values values-uchicago-private.yaml
+```
+
+> **Note:** The init job (`invenio.init: true`) is idempotent — it handles
+> pre-existing DB tables, roles, users, and OpenSearch indices gracefully, so
+> there is no need to wipe RDS between reinstalls unless you specifically want
+> a clean database.
+
+### Monitoring the init job
+
+```bash
+kubectl logs -n invenio -l job-name=invenio-install-init -f
+```
+
+The job may restart once if OpenSearch isn't ready when it first runs — this is
+expected. Once it completes, set `invenio.init: false` and run `helm upgrade` to
+prevent it running again on future upgrades.
+
+---
+
 ## EKS Kubernetes version upgrade
 
 EKS requires upgrading one minor version at a time (e.g. 1.32 → 1.33 → 1.34).

@@ -8,7 +8,7 @@ global:
 ## ECR registry and certificate ARN are in values-uchicago-private.yaml (gitignored).
 image:
   repository: chicago-invenio
-  tag: "latest"
+  tag: "14f8471dbec1471da19e718d6ca980cd8a7d0f8f"
   pullPolicy: Always
 
 ingress:
@@ -23,7 +23,7 @@ ingress:
 
 invenio:
   hostname: uchicago.cottagelabs.com
-  init: false
+  init: true
   sysadmin:
     email: sysadmin@cottagelabs.com
     passwordSecret: invenio-sysadmin-secret
@@ -87,27 +87,34 @@ nginx:
     auth_basic "Restricted";
     auth_basic_user_file /etc/nginx/auth/htpasswd;
 
-## All dependencies run in-cluster for now
 postgresql:
-  enabled: true
-  auth:
-    username: invenio
-    database: invenio
-    existingSecret: invenio-db-secret
-    secretKeys:
-      adminPasswordKey: password
-      userPasswordKey: password
+  enabled: false
+
+postgresqlExternal:
+  port: 5432
+  username: invenio
+  database: invenio
+  existingSecret: invenio-db-secret
+  existingSecretPasswordKey: password
 
 redis:
-  enabled: true
-  # FIXME: auth is disabled (chart default). Enable redis.auth.enabled=true with a
-  # password secret before moving to production, or migrate to AWS ElastiCache.
+  enabled: false
+
+redisExternal:
+  hostname: ""  # set in values-uchicago-private.yaml
 
 rabbitmq:
-  enabled: true
-  auth:
-    existingPasswordSecret: invenio-mq-secret
-    existingSecretPasswordKey: password
+  enabled: false
+
+rabbitmqExternal:
+  hostname: invenio-mq.invenio.svc.cluster.local
+  amqpPort: 5672
+  managementPort: 15672
+  protocol: amqp
+  vhost: ""
+  username: invenio
+  existingSecret: invenio-mq-secret
+  existingSecretPasswordKey: password
 
 opensearch:
   enabled: true

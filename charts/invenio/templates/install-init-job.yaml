@@ -11,12 +11,16 @@ metadata:
     "helm.sh/hook": post-install
     "helm.sh/hook-weight": "1"
 {{/*    "helm.sh/hook-delete-policy": hook-succeeded*/}}
-{{- $cmd := "invenio db init && invenio db create && invenio index init && invenio index queue init purge && invenio files location --default 'default-location'  $(invenio shell --no-term-title -c \"print(app.instance_path)\")'/data' && invenio roles create admin && invenio access allow superuser-access role admin && invenio rdm-records fixtures" -}}
+{{- /* Each step uses || true where the operation is not idempotent, so the job can
+       be safely retried if it fails partway through (e.g. due to a dependency not
+       yet being ready). The index destroy/init pair also handles the case where
+       OpenSearch already has stale indices from a previous partial run. */ -}}
+{{- $cmd := "invenio db init && invenio db create && (invenio index destroy --yes-i-know || true) && invenio index init && invenio index queue init purge && (invenio files location --default 'default-location'  $(invenio shell --no-term-title -c \"print(app.instance_path)\")'/data' || true) && (invenio roles create admin || true) && (invenio access allow superuser-access role admin || true) && invenio rdm-records fixtures" -}}
 {{- range $usr, $pass := .Values.invenio.default_users -}}
-  {{- $cmd = printf "%s && invenio users create --active --confirm --password=%s %s" $cmd $pass $usr -}}
+  {{- $cmd = printf "%s && (invenio users create --active --confirm --password=%s %s || true)" $cmd $pass $usr -}}
 {{- end -}}
 {{- if .Values.invenio.sysadmin.email -}}
-  {{- $cmd = printf "%s && invenio users create --active --confirm --password=$INVENIO_SYSADMIN_PASSWORD %s && invenio roles add %s admin" $cmd .Values.invenio.sysadmin.email .Values.invenio.sysadmin.email -}}
+  {{- $cmd = printf "%s && (invenio users create --active --confirm --password=$INVENIO_SYSADMIN_PASSWORD %s || true) && (invenio roles add %s admin || true)" $cmd .Values.invenio.sysadmin.email .Values.invenio.sysadmin.email -}}
 {{- end -}}
 {{- if and .Values.invenio.demo_data .Values.invenio.default_users -}}
   {{- $cmd = cat $cmd "&& invenio rdm-records demo" -}}

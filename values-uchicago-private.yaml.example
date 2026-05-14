@@ -1,6 +1,6 @@
 ## Account-specific values for uchicago.cottagelabs.com.
 ## Copy this file to values-uchicago-private.yaml (gitignored) and fill in your values.
-## See docs/aws-setup.md for how to obtain these.
+## See docs/aws-setup.md for how to obtain each value.
 
 image:
   registry: <aws-account-id>.dkr.ecr.us-east-2.amazonaws.com
@@ -8,3 +8,10 @@ image:
 ingress:
   annotations:
     alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-2:<aws-account-id>:certificate/<cert-id>
+
+postgresqlExternal:
+  hostname: <rds-endpoint>  # RDS section, step 4
+
+redisExternal:
+  hostname: <elasticache-endpoint>  # ElastiCache section, step 4
+

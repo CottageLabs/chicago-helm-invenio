@@ -73,44 +73,10 @@ AWS_PROFILE=<your-profile> aws route53 create-hosted-zone \
 Note the four NS records returned and add them as NS records for `uchicago`
 in GoDaddy. All DNS under `uchicago.cottagelabs.com` is then managed in Route 53.
 
-### Add ALB alias record once deployed
-
-Once the Invenio ingress has an ALB address:
-
-```bash
-kubectl get ingress invenio -n invenio
-```
-
-Because `uchicago.cottagelabs.com` is the zone apex, a CNAME is not permitted.
-Use a Route 53 **ALIAS A record** instead:
-
-```bash
-ALB_HOSTNAME=<alb-hostname-from-above>
-ZONE_ID=<route53-zone-id>
-
-# Get the ALB's hosted zone ID
-ALB_ZONE=$(AWS_PROFILE=<your-profile> aws elbv2 describe-load-balancers \
-  --region us-east-2 \
-  --query "LoadBalancers[?DNSName=='${ALB_HOSTNAME}'].CanonicalHostedZoneId" \
-  --output text)
-
-AWS_PROFILE=<your-profile> aws route53 change-resource-record-sets \
-  --hosted-zone-id ${ZONE_ID} \
-  --change-batch "{
-    \"Changes\": [{
-      \"Action\": \"CREATE\",
-      \"ResourceRecordSet\": {
-        \"Name\": \"uchicago.cottagelabs.com.\",
-        \"Type\": \"A\",
-        \"AliasTarget\": {
-          \"HostedZoneId\": \"${ALB_ZONE}\",
-          \"DNSName\": \"${ALB_HOSTNAME}\",
-          \"EvaluateTargetHealth\": true
-        }
-      }
-    }]
-  }"
-```
+> **Do not** manually create an A record for `uchicago.cottagelabs.com` — External
+> DNS (installed below) will create and manage it automatically after the first
+> `helm install`. A manually created record will not have TXT ownership and
+> External DNS will not update it when the ALB changes.
 
 ---
 
@@ -428,6 +394,257 @@ kubectl patch storageclass gp2 \
 
 ---
 
+## RDS PostgreSQL
+
+Invenio uses an external RDS PostgreSQL instance rather than the in-cluster subchart,
+giving automated backups, snapshots, and point-in-time recovery.
+
+### 1. Create the security group
+
+Allow port 5432 from the EKS shared node security group only.
+
+```bash
+VPC_ID=$(AWS_PROFILE=<your-profile> aws eks describe-cluster \
+  --name chicago-invenio --region us-east-2 \
+  --query 'cluster.resourcesVpcConfig.vpcId' --output text)
+
+NODE_SG=$(AWS_PROFILE=<your-profile> aws ec2 describe-security-groups \
+  --filters "Name=vpc-id,Values=${VPC_ID}" "Name=group-name,Values=eks-cluster-sg-chicago-invenio-*" \
+  --query 'SecurityGroups[0].GroupId' --output text --region us-east-2)
+
+RDS_SG=$(AWS_PROFILE=<your-profile> aws ec2 create-security-group \
+  --group-name chicago-invenio-rds \
+  --description "RDS PostgreSQL for chicago-invenio" \
+  --vpc-id ${VPC_ID} \
+  --region us-east-2 \
+  --tag-specifications 'ResourceType=security-group,Tags=[{Key=project,Value=chicago-invenio},{Key=Name,Value=chicago-invenio-rds}]' \
+  --query 'GroupId' --output text)
+
+AWS_PROFILE=<your-profile> aws ec2 authorize-security-group-ingress \
+  --group-id ${RDS_SG} \
+  --protocol tcp --port 5432 \
+  --source-group ${NODE_SG} \
+  --region us-east-2
+```
+
+### 2. Create the DB subnet group
+
+```bash
+AWS_PROFILE=<your-profile> aws rds create-db-subnet-group \
+  --db-subnet-group-name chicago-invenio-rds \
+  --db-subnet-group-description "RDS subnet group for chicago-invenio" \
+  --subnet-ids <private-subnet-a> <private-subnet-b> <private-subnet-c> \
+  --tags Key=project,Value=chicago-invenio \
+  --region us-east-2
+```
+
+(Get the private subnet IDs from the EFS section above.)
+
+### 3. Create the RDS instance
+
+```bash
+AWS_PROFILE=<your-profile> aws rds create-db-instance \
+  --db-instance-identifier chicago-invenio \
+  --db-instance-class db.t3.medium \
+  --engine postgres \
+  --engine-version 16 \
+  --master-username invenio \
+  --manage-master-user-password \
+  --db-name invenio \
+  --db-subnet-group-name chicago-invenio-rds \
+  --vpc-security-group-ids ${RDS_SG} \
+  --no-publicly-accessible \
+  --storage-type gp3 \
+  --allocated-storage 20 \
+  --backup-retention-period 7 \
+  --deletion-protection \
+  --tags Key=project,Value=chicago-invenio Key=Name,Value=chicago-invenio \
+  --region us-east-2
+
+# Wait for the instance to be available (~10 minutes)
+AWS_PROFILE=<your-profile> aws rds wait db-instance-available \
+  --db-instance-identifier chicago-invenio --region us-east-2
+```
+
+### 4. Get the endpoint and update values-uchicago-private.yaml
+
+```bash
+AWS_PROFILE=<your-profile> aws rds describe-db-instances \
+  --db-instance-identifier chicago-invenio --region us-east-2 \
+  --query 'DBInstances[0].Endpoint.Address' --output text
+```
+
+Update `postgresqlExternal.hostname` in `values-uchicago-private.yaml` with this value.
+
+### 5. Create the Kubernetes DB secret
+
+The master password is stored in AWS Secrets Manager (managed automatically by RDS).
+Retrieve it and create the cluster secret:
+
+```bash
+SECRET_ARN=$(AWS_PROFILE=<your-profile> aws rds describe-db-instances \
+  --db-instance-identifier chicago-invenio --region us-east-2 \
+  --query 'DBInstances[0].MasterUserSecret.SecretArn' --output text)
+
+DB_PASSWORD=$(AWS_PROFILE=<your-profile> aws secretsmanager get-secret-value \
+  --secret-id ${SECRET_ARN} --region us-east-2 \
+  --query 'SecretString' --output text | python3 -c "import sys,json; print(json.load(sys.stdin)['password'])")
+
+kubectl create secret generic invenio-db-secret \
+  --from-literal=password="${DB_PASSWORD}" \
+  --namespace invenio
+```
+
+---
+
+## ElastiCache Redis
+
+Invenio uses an external ElastiCache Redis instance rather than the in-cluster subchart.
+
+> **Note:** Redis auth is currently disabled. This is acceptable for a VPC-internal
+> cache but should be hardened before production use.
+
+### 1. Create the security group
+
+Allow port 6379 from the EKS shared node security group only.
+
+```bash
+VPC_ID=$(AWS_PROFILE=<your-profile> aws eks describe-cluster \
+  --name chicago-invenio --region us-east-2 \
+  --query 'cluster.resourcesVpcConfig.vpcId' --output text)
+
+NODE_SG=$(AWS_PROFILE=<your-profile> aws ec2 describe-security-groups \
+  --filters "Name=vpc-id,Values=${VPC_ID}" "Name=group-name,Values=eks-cluster-sg-chicago-invenio-*" \
+  --query 'SecurityGroups[0].GroupId' --output text --region us-east-2)
+
+REDIS_SG=$(AWS_PROFILE=<your-profile> aws ec2 create-security-group \
+  --group-name chicago-invenio-redis \
+  --description "ElastiCache Redis for chicago-invenio" \
+  --vpc-id ${VPC_ID} \
+  --region us-east-2 \
+  --tag-specifications 'ResourceType=security-group,Tags=[{Key=project,Value=chicago-invenio},{Key=Name,Value=chicago-invenio-redis}]' \
+  --query 'GroupId' --output text)
+
+AWS_PROFILE=<your-profile> aws ec2 authorize-security-group-ingress \
+  --group-id ${REDIS_SG} \
+  --protocol tcp --port 6379 \
+  --source-group ${NODE_SG} \
+  --region us-east-2
+```
+
+### 2. Create the cache subnet group
+
+```bash
+AWS_PROFILE=<your-profile> aws elasticache create-cache-subnet-group \
+  --cache-subnet-group-name chicago-invenio-redis \
+  --cache-subnet-group-description "ElastiCache subnet group for chicago-invenio" \
+  --subnet-ids <private-subnet-a> <private-subnet-b> <private-subnet-c> \
+  --tags Key=project,Value=chicago-invenio \
+  --region us-east-2
+```
+
+(Get the private subnet IDs from the EFS section above.)
+
+### 3. Create the ElastiCache cluster
+
+```bash
+AWS_PROFILE=<your-profile> aws elasticache create-cache-cluster \
+  --cache-cluster-id chicago-invenio \
+  --cache-node-type cache.t3.small \
+  --engine redis \
+  --num-cache-nodes 1 \
+  --cache-subnet-group-name chicago-invenio-redis \
+  --security-group-ids ${REDIS_SG} \
+  --no-transit-encryption-enabled \
+  --tags Key=project,Value=chicago-invenio Key=Name,Value=chicago-invenio \
+  --region us-east-2
+
+# Wait for the cluster to be available (~5 minutes)
+AWS_PROFILE=<your-profile> aws elasticache wait cache-cluster-available \
+  --cache-cluster-id chicago-invenio --region us-east-2
+```
+
+### 4. Get the endpoint and update values-uchicago-private.yaml
+
+```bash
+AWS_PROFILE=<your-profile> aws elasticache describe-cache-clusters \
+  --cache-cluster-id chicago-invenio --region us-east-2 \
+  --show-cache-node-info \
+  --query 'CacheClusters[0].CacheNodes[0].Endpoint.Address' --output text
+```
+
+Update `redisExternal.hostname` in `values-uchicago-private.yaml` with this value.
+
+---
+
+## RabbitMQ (Cluster Operator)
+
+Invenio uses a RabbitMQ instance deployed via the [RabbitMQ Cluster Operator](https://www.rabbitmq.com/kubernetes/operator/operator-overview)
+rather than the in-cluster Bitnami subchart. Unlike RDS and ElastiCache, this is
+not an external AWS service — it runs entirely within EKS. The operator runs in
+`rabbitmq-system` and manages `RabbitmqCluster` resources; the cluster itself runs
+in the `invenio` namespace alongside the application.
+
+### 1. Install the operators
+
+The cluster operator manages `RabbitmqCluster` resources. The messaging topology
+operator (with cert-manager) manages `User` and `Permission` resources.
+
+```bash
+# cert-manager (required by the topology operator)
+helm install cert-manager jetstack/cert-manager \
+  --namespace cert-manager --create-namespace \
+  --set crds.enabled=true
+
+kubectl wait --for=condition=Available deployment/cert-manager-webhook \
+  -n cert-manager --timeout=120s
+
+# RabbitMQ Cluster Operator
+helm repo add rabbitmq-operator https://rabbitmq.github.io/rabbitmq-operator && \
+  helm repo update rabbitmq-operator
+
+helm install rabbitmq-operator rabbitmq-operator/rabbitmq-cluster-operator \
+  -n rabbitmq-system --create-namespace
+
+# RabbitMQ Messaging Topology Operator
+kubectl apply -f https://github.com/rabbitmq/messaging-topology-operator/releases/latest/download/messaging-topology-operator-with-certmanager.yaml
+
+kubectl wait --for=condition=Available deployment/messaging-topology-operator \
+  -n rabbitmq-system --timeout=120s
+```
+
+### 2. Create the credentials secret
+
+The `User` CR imports credentials from `invenio-mq-secret`, which must exist before
+applying the manifest. Create it with a strong password:
+
+```bash
+kubectl create secret generic invenio-mq-secret \
+  --from-literal=username=invenio \
+  --from-literal=password="<strong-password>" \
+  --namespace invenio
+```
+
+> Store this password in your password manager.
+
+### 3. Deploy the RabbitMQ cluster
+
+```bash
+kubectl apply -f k8s/rabbitmq.yaml
+```
+
+Wait for the cluster to be ready:
+
+```bash
+kubectl wait rabbitmqcluster invenio-mq -n invenio \
+  --for=condition=AllReplicasReady --timeout=300s
+```
+
+Invenio connects as user `invenio` using the password from `invenio-mq-secret`. No further
+credential lookup is needed.
+
+---
+
 ## External DNS
 
 External DNS automatically keeps the Route 53 alias record in sync with the
@@ -514,17 +731,28 @@ will update automatically once the new ALB is assigned to the ingress.
 
 ### 1. Create the namespace and secrets
 
-> These are not stored in the repo. Store the passwords in a password manager.
+Before deploying, complete the RDS, ElastiCache, and RabbitMQ sections above — they
+create the required secrets (`invenio-db-secret`, `invenio-mq-secret`) and provide
+the values needed in `values-uchicago-private.yaml`.
+
+Copy the example and fill in your values:
+
+```bash
+cp values-uchicago-private.yaml.example values-uchicago-private.yaml
+# edit values-uchicago-private.yaml
+```
+
+Then create the namespace and remaining secrets:
 
 ```bash
 kubectl create namespace invenio
 
-kubectl create secret generic invenio-db-secret \
-  --from-literal=password="<db-password>" \
-  --namespace invenio
+# invenio-db-secret and invenio-mq-secret are created in the RDS and RabbitMQ
+# sections above — ensure those steps are complete before continuing.
 
-kubectl create secret generic invenio-mq-secret \
-  --from-literal=password="<mq-password>" \
+# Sysadmin user password (used by the init job to create the admin account)
+kubectl create secret generic invenio-sysadmin-secret \
+  --from-literal=password="<strong-password>" \
   --namespace invenio
 
 # Basic auth (pre-production only — remove nginx.extraVolumeMounts,

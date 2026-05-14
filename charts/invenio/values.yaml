@@ -1032,10 +1032,6 @@ redis:
     ## @param redis.auth.enabled Enable password authentication
     ##
     enabled: false  # Dangerous! This lets Invenio connect to Redis unauthenticated!
-  image:
-    ## @param redis.image.repository Sets bitnamilegacy by default
-    ##
-    repository: bitnamilegacy/redis  # Work-around until we've migrated away from Bitnami.
   master:
     ## @param redis.master.disableCommands
     disableCommands: []  # Dangerous! This lets us run the `FLUSHALL` and `FLUSHDB` commands! Unfortunately, they are required by the wipe_recreate.sh script when installing Invenio.
@@ -1060,10 +1056,6 @@ rabbitmq:
   ## @param rabbitmq.auth.password
   auth:
     password: ""
-  image:
-    ## @param rabbitmq.image.repository Sets bitnamilegacy by default
-    ##
-    repository: bitnamilegacy/rabbitmq  # Work-around until we've migrated away from Bitnami.
 
 ## @param rabbitmqExternal External RabbitMQ configuration
 ## All of these values are only used when rabbitmq.enabled is set to false
