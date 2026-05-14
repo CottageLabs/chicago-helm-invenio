@@ -50,10 +50,13 @@ persistence:
 terminal:
   enabled: true
   replicas: 0
+  extraVolumes:
+    - name: import-data-s3
+      persistentVolumeClaim:
+        claimName: import-data-s3
   extraVolumeMounts:
-    - name: shared-volume
-      mountPath: /opt/invenio/var/instance/import-data
-      subPath: import-data
+    - name: import-data-s3
+      mountPath: /mnt/import-data
 
 
 web:

@@ -23,3 +23,54 @@ parameters:
   provisioningMode: efs-ap
   fileSystemId: fs-0e8f6bacbcc4515bf
   directoryPerms: "700"
+---
+## S3 storage class for the import data volume (ReadWriteMany).
+## Backed by the Mountpoint for Amazon S3 CSI driver — suitable for staging
+## import files, not for random writes or database use.
+## Requires the aws-mountpoint-s3-csi-driver addon to be installed on the cluster
+## and the node IAM role to have the s3-import-data-access inline policy.
+## See docs/aws-setup.md for setup instructions.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: s3
+provisioner: s3.csi.aws.com
+---
+## Static PV pointing at the chicago-invenio-import-data S3 bucket.
+## S3 CSI does not support dynamic provisioning, so the PV is defined manually.
+## The capacity value is nominal — S3 has no enforced size limit.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: import-data-s3
+spec:
+  storageClassName: s3
+  capacity:
+    storage: 10Ti
+  accessModes:
+    - ReadWriteMany
+  mountOptions:
+    - allow-delete
+    - region us-east-2
+  csi:
+    driver: s3.csi.aws.com
+    volumeHandle: import-data-s3
+    volumeAttributes:
+      bucketName: chicago-invenio-import-data
+---
+## PVC that binds to the import-data-s3 PV above.
+## Mounted into the terminal pod at /mnt/import-data via
+## terminal.extraVolumeMounts in values-uchicago.yaml.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: import-data-s3
+  namespace: invenio
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: s3
+  resources:
+    requests:
+      storage: 10Ti
+  volumeName: import-data-s3
