@@ -35,9 +35,6 @@ invenio:
     secretKeys:
       usernameKey: DATACITE_USERNAME
       passwordKey: DATACITE_PASSWORD
-  extraEnvVars:
-    - name: CHI_ENABLE_CURATIONS
-      value: "true"
   extraEnvFrom:
     - secretRef:
         name: invenio-mail-secret
