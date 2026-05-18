@@ -493,6 +493,12 @@ DB_PASSWORD=$(AWS_PROFILE=<your-profile> aws secretsmanager get-secret-value \
 kubectl create secret generic invenio-db-secret \
   --from-literal=password="${DB_PASSWORD}" \
   --namespace invenio
+
+# Disable automatic rotation — the password is stored in a static Kubernetes
+# secret and pods must be restarted to pick up any change. Without this,
+# RDS will rotate the password every 7 days and break the application.
+AWS_PROFILE=<your-profile> aws secretsmanager cancel-rotate-secret \
+  --secret-id ${SECRET_ARN} --region us-east-2
 ```
 
 ---
