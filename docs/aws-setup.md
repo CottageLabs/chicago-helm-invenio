@@ -394,6 +394,118 @@ kubectl patch storageclass gp2 \
 
 ---
 
+## S3 bucket mount (import data)
+
+The terminal pod mounts an S3 bucket at `/mnt/import-data` for staging import
+files. The bucket is backed by the Mountpoint for Amazon S3 CSI driver, which
+exposes a bucket as a read/write filesystem. It is suitable for dropping in
+files and reading them once — not for random writes or database use.
+
+The PersistentVolume, PersistentVolumeClaim, and StorageClass are defined in
+`k8s/storageclasses.yaml` and applied in the EFS step above. The terminal
+volume mount is configured in `values-uchicago.yaml`.
+
+### 1. Create the S3 bucket
+
+```bash
+AWS_PROFILE=<your-profile> aws s3 mb s3://chicago-invenio-import-data \
+  --region us-east-2
+```
+
+Update the `bucketName` in `k8s/storageclasses.yaml` if you use a different name.
+
+### 2. Grant the node IAM role S3 access
+
+Find the node instance role:
+
+```bash
+AWS_PROFILE=<your-profile> aws eks describe-nodegroup \
+  --cluster-name chicago-invenio \
+  --nodegroup-name workers \
+  --region us-east-2 \
+  --query 'nodegroup.nodeRole' \
+  --output text
+```
+
+Add an inline policy named `s3-import-data-access` to that role via the AWS
+Console (**IAM → Roles → `<node-instance-role>` → Add permissions → Create
+inline policy**):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:AbortMultipartUpload",
+        "s3:ListMultipartUploadParts"
+      ],
+      "Resource": "arn:aws:s3:::chicago-invenio-import-data/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket"],
+      "Resource": "arn:aws:s3:::chicago-invenio-import-data"
+    }
+  ]
+}
+```
+
+The deployed node instance role is
+`eksctl-chicago-invenio-nodegroup-w-NodeInstanceRole-K5x1EY0Kf6Fp`.
+
+### 3. Install the Mountpoint S3 CSI driver
+
+The `chicago-invenio-devops-role` requires additional EKS permissions to manage
+addons. Add an inline policy named `eksctl-addon-policy` to that role via the
+AWS Console:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "eks:DescribeClusterVersions",
+        "eks:CreateAddon",
+        "eks:DescribeAddon",
+        "eks:DescribeAddonVersions",
+        "eks:DescribeAddonConfiguration",
+        "eks:UpdateAddon",
+        "iam:GetOpenIDConnectProvider"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+Then install the addon:
+
+```bash
+eksctl create addon \
+  --name aws-mountpoint-s3-csi-driver \
+  --cluster chicago-invenio \
+  --region us-east-2
+```
+
+### 4. Apply the storage classes
+
+The S3 StorageClass, PV, and PVC are included in `k8s/storageclasses.yaml`
+alongside the EFS and gp3 classes. If already applied in the EFS step, no
+further action is needed:
+
+```bash
+kubectl apply -f k8s/storageclasses.yaml
+```
+
+---
+
 ## RDS PostgreSQL
 
 Invenio uses an external RDS PostgreSQL instance rather than the in-cluster subchart,
