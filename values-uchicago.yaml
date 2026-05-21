@@ -8,7 +8,7 @@ global:
 ## ECR registry and certificate ARN are in values-uchicago-private.yaml (gitignored).
 image:
   repository: chicago-invenio
-  tag: "14f8471dbec1471da19e718d6ca980cd8a7d0f8f"
+  tag: "a853cd3b1b3cfb3741b54c1dc33db87caf19c9b6"
   pullPolicy: Always
 
 ingress:
@@ -50,6 +50,13 @@ persistence:
 terminal:
   enabled: true
   replicas: 0
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
   extraVolumes:
     - name: import-data-s3
       persistentVolumeClaim:
