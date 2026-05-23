@@ -29,7 +29,7 @@ invenio:
     passwordSecret: invenio-sysadmin-secret
   datacite:
     enabled: true
-    prefix: "10.70047"
+    prefix: "10.6082"
     testMode: true
     existingSecret: invenio-datacite-secret
     secretKeys:
