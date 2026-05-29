@@ -14,6 +14,15 @@ chart values, or upgrade the Helm chart itself.
 
 ### 1. Build and push the application image
 
+If you are not set up with the gpg password manager, `docker login` may fail with a "credential store error". To work around this, you can disable the credential store for Docker by creating a config file with an empty `credsStore`:
+
+```bash 
+mkdir -p ~/.docker
+  echo '{"credsStore": ""}' > ~/.docker/config.json
+```
+
+then
+
 ```bash
 AWS_ACCOUNT=$(AWS_PROFILE=<your-profile> aws sts get-caller-identity --query Account --output text)
 ECR="${AWS_ACCOUNT}.dkr.ecr.us-east-2.amazonaws.com"
@@ -22,12 +31,14 @@ AWS_PROFILE=<your-profile> aws ecr get-login-password --region us-east-2 \
   | docker login --username AWS --password-stdin ${ECR}
 
 cd ../chicago-invenio
+rm Pipfile.lock  # ensure dependencies are up to date
+invenio-cli packages lock
 docker build -t chicago-invenio:<version> .
 docker tag chicago-invenio:<version> ${ECR}/chicago-invenio:<version>
 docker push ${ECR}/chicago-invenio:<version>
 ```
 
-Update `values-uchicago.yaml` with the new image tag before proceeding.
+Update `values-uchicago.yaml` with the new image tag and commit/push before proceeding.
 
 ### 2. Update chart dependencies (if the chart version changed)
 
@@ -59,6 +70,7 @@ helm upgrade invenio charts/invenio \
 ### 5. Monitor the rollout
 
 ```bash
+kubectl get all -n invenio
 kubectl rollout status deployment/invenio-web -n invenio
 kubectl rollout status deployment/invenio-worker -n invenio
 kubectl get pods -n invenio

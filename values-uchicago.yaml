@@ -1,5 +1,5 @@
 ## Chicago / UChicago deployment values
-## Target: uchicago.cottagelabs.com
+## Target: uchicago.cottagelabs.com / knowledge.uchicago.edu
 ## Cluster: chicago-invenio (us-east-2)
 
 global:
@@ -22,7 +22,7 @@ ingress:
     alb.ingress.kubernetes.io/tags: project=chicago-invenio
 
 invenio:
-  hostname: uchicago.cottagelabs.com
+  hostname: knowledge.uchicago.edu
   init: true
   sysadmin:
     email: sysadmin@cottagelabs.com
