@@ -35,6 +35,8 @@ invenio:
     secretKeys:
       usernameKey: DATACITE_USERNAME
       passwordKey: DATACITE_PASSWORD
+  extraConfig:
+    INVENIO_TRUSTED_HOSTS: '["knowledge.uchicago.edu", "uchicago.cottagelabs.com"]'
   extraEnvFrom:
     - secretRef:
         name: invenio-mail-secret
