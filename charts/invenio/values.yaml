@@ -67,6 +67,9 @@ ingress:
   ## @param ingress.tlsSecretNameOverride Custom TLS secret name.
   ##
   tlsSecretNameOverride: ""
+  ## @param ingress.extraHosts Additional hostnames to route to the same web backend.
+  ##
+  extraHosts: []
 
 ## Openshift Route object
 ## @param route.annotations Annotations to be added to the Route

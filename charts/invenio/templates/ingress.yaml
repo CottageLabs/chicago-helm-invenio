@@ -29,5 +29,17 @@ spec:
                 port:
                   name: http
             pathType: Prefix
+{{- range .Values.ingress.extraHosts }}
+    - host: {{ . }}
+      http:
+        paths:
+          - path: /
+            backend:
+              service:
+                name: {{ include "invenio.fullname" $ }}-web
+                port:
+                  name: http
+            pathType: Prefix
+{{- end }}
 {{- end }}
 {{- end }}
