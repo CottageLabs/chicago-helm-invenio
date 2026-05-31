@@ -160,12 +160,10 @@ invenio:
     ## @param invenio.datacite.prefix DataCite DOI prefix, it will translate into DATACITE_PREFIX.
     ##
     prefix: ""
-    ## @param invenio.datacite.testMode DataCite test mode enabled, it will trasnlate into DATACITE_TEST_MODE.
-    ## This has to be a string value, Invenio will evaluate this as a python expression and transform it into a boolean.
-    ## Example:
-    ## testMode: "False"
+    ## @param invenio.datacite.testMode DataCite test mode enabled, it will translate into DATACITE_TEST_MODE.
+    ## Use a boolean value: true or false (not a string).
     ##
-    testMode: ""
+    testMode: true
     ## @param invenio.datacite.format A string used for formatting the DOI, it will translate into DATACITE_FORMAT.
     ##
     format: ""
