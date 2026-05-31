@@ -32,7 +32,7 @@ invenio:
   datacite:
     enabled: true
     prefix: "10.6082"
-    testMode: true
+    testMode: false
     existingSecret: invenio-datacite-secret
     secretKeys:
       usernameKey: DATACITE_USERNAME
