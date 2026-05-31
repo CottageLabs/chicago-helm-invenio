@@ -14,6 +14,8 @@ image:
 ingress:
   enabled: true
   class: alb
+  extraHosts:
+    - uchicago.cottagelabs.com
   annotations:
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
@@ -35,6 +37,9 @@ invenio:
     secretKeys:
       usernameKey: DATACITE_USERNAME
       passwordKey: DATACITE_PASSWORD
+  extraConfig:
+    # uchicago.cottagelabs.com is listed in ingress.extraHosts above.
+    INVENIO_TRUSTED_HOSTS: '["knowledge.uchicago.edu", "uchicago.cottagelabs.com"]'
   extraEnvFrom:
     - secretRef:
         name: invenio-mail-secret
