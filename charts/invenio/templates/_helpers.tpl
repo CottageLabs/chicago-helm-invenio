@@ -462,7 +462,11 @@ Add datacite environmental variables
 - name: INVENIO_DATACITE_PREFIX
   value: {{ required "Missing .Values.invenio.datacite.prefix" .Values.invenio.datacite.prefix | quote }}
 - name: INVENIO_DATACITE_TEST_MODE
-  value: {{ .Values.invenio.datacite.testMode | capitalize }}
+  {{- if eq (toString .Values.invenio.datacite.testMode | lower) "false" }}
+  value: False
+  {{- else }}
+  value: True
+  {{- end }}
 {{- with .Values.invenio.datacite.format }}
 - name: INVENIO_DATACITE_FORMAT
   value: {{ . }}
