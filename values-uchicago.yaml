@@ -72,7 +72,7 @@ terminal:
 
 
 web:
-  replicas: 2
+  replicas: 4
   uwsgi:
     processes: 4
     threads: 2
