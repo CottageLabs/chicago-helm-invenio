@@ -70,6 +70,9 @@ terminal:
     - name: import-data-s3
       mountPath: /mnt/import-data
 
+sentry:
+  enabled: true
+  existingSecret: invenio-sentry-secret
 
 web:
   replicas: 4
