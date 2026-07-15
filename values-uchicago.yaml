@@ -74,8 +74,19 @@ terminal:
 web:
   replicas: 2
   uwsgi:
-    processes: 2
+    processes: 4
     threads: 2
+  readinessProbe:
+    failureThreshold: 5
+    timeoutSeconds: 5
+  startupProbe:
+    failureThreshold: 5
+    timeoutSeconds: 5
+
+nginx:
+  readinessProbe:
+    failureThreshold: 5
+    timeoutSeconds: 5
 
 worker:
   replicas: 2
