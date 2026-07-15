@@ -267,6 +267,17 @@ nginx:
   ##
   files:
     client_max_body_size: 50G
+  ## @extra nginx.readinessProbe `readinessProbe` for the nginx container
+  ## ref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+  ##
+  readinessProbe:
+    httpGet:
+      path: /ping
+      port: 8080
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    failureThreshold: 3
+    timeoutSeconds: 1
   ## @param nginx.resources `resources` for the nginx container
   ##
   ## We have decided to unset resources by default, leaving that as a conscious choice for the user.

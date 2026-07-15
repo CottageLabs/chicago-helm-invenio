@@ -166,12 +166,7 @@ spec:
         {{- with .Values.nginx.extraVolumeMounts }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-        readinessProbe:
-          httpGet:
-            path: /ping
-            port: 8080
-          initialDelaySeconds: 15
-          timeoutSeconds: 1
+        readinessProbe: {{- toYaml .Values.nginx.readinessProbe | nindent 10 }}
         resources: {{- toYaml .Values.nginx.resources | nindent 10 }}
         securityContext:
           {{- with .Values.nginx.securityContext }}

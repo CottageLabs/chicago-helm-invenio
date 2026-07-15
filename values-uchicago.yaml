@@ -8,7 +8,7 @@ global:
 ## ECR registry and certificate ARN are in values-uchicago-private.yaml (gitignored).
 image:
   repository: chicago-invenio
-  tag: "2175f2ff8ed8a8ef21b4fc31fba3183b4a029818"
+  tag: "ba81bbb57542df1fc4b3adc2175d7ab5db8e35fb"
   pullPolicy: Always
 
 ingress:
@@ -72,14 +72,46 @@ terminal:
 
 
 web:
-  replicas: 2
+  replicas: 4
   uwsgi:
-    processes: 2
+    processes: 4
     threads: 2
+  readinessProbe:
+    failureThreshold: 5
+    timeoutSeconds: 5
+  startupProbe:
+    failureThreshold: 5
+    timeoutSeconds: 5
+  resources:
+    requests:
+      cpu: 500m
+      memory: 4Gi
+    limits:
+      cpu: 2000m
+      memory: 8Gi
+
+nginx:
+  readinessProbe:
+    failureThreshold: 5
+    timeoutSeconds: 5
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
 
 worker:
   replicas: 2
   concurrency: 2
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
 
 flower:
   enabled: false
