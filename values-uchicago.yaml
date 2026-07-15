@@ -72,7 +72,7 @@ terminal:
 
 sentry:
   enabled: true
-  existingSecret: "CHANGE_ME"
+  existingSecret: invenio-sentry-secret
 
 web:
   replicas: 2
