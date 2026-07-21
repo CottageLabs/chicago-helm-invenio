@@ -8,7 +8,7 @@ global:
 ## ECR registry and certificate ARN are in values-uchicago-private.yaml (gitignored).
 image:
   repository: chicago-invenio
-  tag: "ba81bbb57542df1fc4b3adc2175d7ab5db8e35fb"
+  tag: "e5bf0e13f168a04144e68a3ceb299d3928f9c90b"
   pullPolicy: Always
 
 ingress:
@@ -45,6 +45,21 @@ invenio:
         name: invenio-mail-secret
     - secretRef:
         name: invenio-oauth-secret
+  sentry:
+    enabled: true
+    existingSecret: invenio-sentry-secret
+  ## Recycle a uwsgi worker once its own RSS crosses these thresholds (in MB), so a
+  ## worker that balloons during a heavy operation doesn't keep running at that size
+  ## indefinitely. Without this, workers only recycle on max-requests (see
+  ## uwsgi-configmap.yaml), which has no ceiling on memory between recycles -- this is
+  ## what let individual web pods grow past their 4Gi request (to 5.5-7.3Gi observed)
+  ## until the node evicted them under memory pressure.
+  ## reload-on-rss: graceful, worker finishes its current request first.
+  ## evil-reload-on-rss: set higher, as a hard backstop closer to the 8Gi container
+  ## limit -- only kicks in if a worker somehow blows past the graceful threshold too.
+  uwsgiExtraConfig:
+    reload-on-rss: 2048
+    evil-reload-on-rss: 3072
 
 persistence:
   enabled: true
@@ -70,10 +85,6 @@ terminal:
     - name: import-data-s3
       mountPath: /mnt/import-data
 
-sentry:
-  enabled: true
-  existingSecret: invenio-sentry-secret
-
 web:
   replicas: 4
   uwsgi:
@@ -91,7 +102,7 @@ web:
       memory: 4Gi
     limits:
       cpu: 2000m
-      memory: 8Gi
+      memory: 6Gi
 
 nginx:
   readinessProbe:
