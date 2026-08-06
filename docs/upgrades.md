@@ -31,11 +31,13 @@ AWS_PROFILE=<your-profile> aws ecr get-login-password --region us-east-2 \
   | docker login --username AWS --password-stdin ${ECR}
 
 cd ../chicago-invenio
+TAG=$(git rev-parse HEAD)  # Use the latest commit hash as the image tag
 rm Pipfile.lock  # ensure dependencies are up to date
 invenio-cli packages lock
-docker build -t chicago-invenio:<version> .
-docker tag chicago-invenio:<version> ${ECR}/chicago-invenio:<version>
-docker push ${ECR}/chicago-invenio:<version>
+
+docker build -t chicago-invenio:${TAG} .
+docker tag chicago-invenio:${TAG} ${ECR}/chicago-invenio:${TAG}
+docker push ${ECR}/chicago-invenio:${TAG}
 ```
 
 Update `values-uchicago.yaml` with the new image tag and commit/push before proceeding.
