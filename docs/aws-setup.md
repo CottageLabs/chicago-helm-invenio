@@ -932,3 +932,11 @@ helm upgrade invenio charts/invenio \
 
 Once `kubectl get ingress invenio -n invenio` shows an ALB address,
 follow the DNS section above to create the alias record.
+
+---
+
+## Monitoring and alerting
+
+See [aws-monitoring-and-alerting.md](aws-monitoring-and-alerting.md) for
+CloudWatch Container Insights setup and the node-failure / pod-crash-loop
+alarms.

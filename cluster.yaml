@@ -11,9 +11,9 @@ metadata:
 managedNodeGroups:
   - name: workers
     instanceType: t3.xlarge
-    minSize: 2
+    minSize: 3
     maxSize: 4
-    desiredCapacity: 2
+    desiredCapacity: 3
     volumeSize: 50
     tags:
       project: chicago-invenio
@@ -23,8 +23,22 @@ managedNodeGroups:
         ebs: true
         albIngress: true
 
+iam:
+  withOIDC: true
+  serviceAccounts:
+    - metadata:
+        name: cloudwatch-agent
+        namespace: amazon-cloudwatch
+      attachPolicyARNs:
+        - "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+      roleName: chicago-invenio-cloudwatch-agent-role
+      roleOnly: true
+
 addons:
   - name: aws-ebs-csi-driver
   - name: coredns
   - name: kube-proxy
   - name: vpc-cni
+  # amazon-cloudwatch-observability is installed imperatively, not declared
+  # here - its serviceAccountRoleARN embeds the AWS account ID, which we
+  # don't want committed. See docs/aws-monitoring-and-alerting.md.

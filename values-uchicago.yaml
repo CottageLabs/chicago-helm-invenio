@@ -8,7 +8,7 @@ global:
 ## ECR registry and certificate ARN are in values-uchicago-private.yaml (gitignored).
 image:
   repository: chicago-invenio
-  tag: "e5bf0e13f168a04144e68a3ceb299d3928f9c90b"
+  tag: "3014d5d6bbfe27ad8e7bd635940abafdb4446643"
   pullPolicy: Always
 
 ingress:
@@ -161,3 +161,8 @@ rabbitmqExternal:
 
 opensearch:
   enabled: true
+  # "soft" (the chart default) only prefers spreading master pods across
+  # nodes - the scheduler can still co-locate them under pressure. "hard"
+  # requires it, so a single node failure can't take out a majority of the
+  # master quorum at once.
+  antiAffinity: "hard"
