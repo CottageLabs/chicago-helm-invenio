@@ -14,7 +14,7 @@ spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: web
+    name: {{ include "invenio.fullname" . }}-web
   targetCPUUtilizationPercentage: {{ .Values.web.autoscaler.scaler_cpu_utilization }}
 {{- end }}
 

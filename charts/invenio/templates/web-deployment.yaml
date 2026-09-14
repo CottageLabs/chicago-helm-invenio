@@ -23,7 +23,9 @@ spec:
   {{- with .Values.web.deployment.spec.progressDeadlineSeconds }}
   progressDeadlineSeconds: {{- toYaml . | nindent 4 }}
   {{- end }}
+  {{- if not .Values.web.autoscaler.enabled }}
   replicas: {{ .Values.web.replicas }}
+  {{- end }}
   {{- with .Values.web.deployment.spec.revisionHistoryLimit }}
   revisionHistoryLimit: {{- toYaml . | nindent 4 }}
   {{- end }}
