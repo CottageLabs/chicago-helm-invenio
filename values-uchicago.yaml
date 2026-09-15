@@ -87,6 +87,11 @@ terminal:
 
 web:
   replicas: 4
+  autoscaler:
+    enabled: true
+    scaler_cpu_utilization: 65
+    min_web_replicas: 4
+    max_web_replicas: 10
   uwsgi:
     processes: 4
     threads: 2
