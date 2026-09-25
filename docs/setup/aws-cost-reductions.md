@@ -15,7 +15,7 @@ August 2026, from Cost Explorer (tagged `project=chicago-invenio`):
 |---|---|---|
 | EC2 nodes (3× t3.xlarge) | ~$370 | On-demand; no Savings Plan or reserved instances |
 | EFS storage | ~$216 | 776 GB, all in Standard at $0.30/GB-month — addressed below |
-| Data transfer out (via ALB) | ~$166 | 1.4–2.4 TB/month, June–September; see [CloudFront](#cloudfront-planned) |
+| Data transfer out (via ALB) | ~$166 | 1.4–2.4 TB/month, June–September; see [CloudFront](#cloudfront) |
 | NAT gateway, ALB hours and LCUs | ~$67 | |
 | RDS, ElastiCache, EBS, ECR, other | ~$80 | |
 
@@ -225,6 +225,57 @@ before the switch, and rollback. In short:
   switching that Route 53 record moved both.
 - **`PROXYFIX_CONFIG` `x_for` raised to 2** (see
   [above](#correct-visitor-ip-addresses)).
+
+### Moving to the Pro plan
+
+Decided 25 September 2026: stay on pay-as-you-go for a week to confirm the
+setup and the actual CloudFront figures, then move to Pro. The only
+distribution in the account is this one, so the always-free 1 TB and 10M
+requests aren't shared with the other project.
+
+**Why Pro.** Pay-as-you-go comes to about $65/month at typical traffic
+(~$120 in a 2.4 TB month like July 2026), against a flat $15. Our
+distribution needs no changes: it only uses AWS-managed cache and origin
+request policies and a single behaviour, all allowed on Pro. The plan also
+covers the Route 53 hosted zone, CloudFront and WAF logs in CloudWatch, and
+gives 50 GB of S3 storage credit (the OpenSearch snapshot bucket is ~7 GB).
+There's no commitment: a cancelled plan reverts to pay-as-you-go at the next
+billing cycle.
+
+**Checks after a week** (from 2 October 2026):
+
+- CloudFront usage for the distribution (CloudFront console → Reports, or
+  CloudWatch `AWS/CloudFront` `Requests` and `BytesDownloaded`, region
+  us-east-1, dimension `DistributionId=E240LA3XOMZ4VT`, `Region=Global`):
+  scale to a month and compare with Pro's 10M requests and 50 TB.
+- Cost Explorer: the ALB's `USE2-DataTransfer-Out-Bytes` should have
+  dropped to almost nothing, with CloudFront data transfer in its place.
+- Rate-limiter keys and stats still show real visitor IPs (see
+  [Correct visitor IP addresses](#correct-visitor-ip-addresses)).
+- No errors reported by users (uploads, logins, downloads).
+
+**The WAF is the risk.** Pro requires a WAF web ACL on the distribution, and
+AWS's standard managed rules would block legitimate traffic on this site:
+the Core rule set blocks request bodies over 8 KB (every file upload), and
+its injection rules can match search queries containing quotes and brackets.
+Pro inspects only the first 16 KB of a body. So:
+
+1. Create the web ACL ourselves before subscribing, with any managed rules
+   set to **Count** (log, never block). If the console offers
+   "recommended protections" while subscribing, don't accept blocking rules.
+2. Subscribe the distribution to Pro and attach that web ACL.
+3. Re-run the upload tests through CloudFront (see
+   [aws-cloudfront.md, step 3](aws-cloudfront.md#3-test-before-switching-dns)),
+   with a new personal access token.
+4. After a week, review the WAF logs for what would have been blocked, and
+   only then switch chosen rules to Block. Blocking obvious bots also
+   reduces the request count, since WAF-blocked requests don't count toward
+   the allowance.
+
+**Request allowance.** 6–11M requests/month is around Pro's 10M. AWS says
+allowances aren't hard limits: a first spike up to 3× is tolerated, and only
+sustained, substantial excess over 2–3 months can lead to reduced delivery
+performance, after notification emails at 50%, 80% and 100%.
 
 ### Why not Cloudflare
 
