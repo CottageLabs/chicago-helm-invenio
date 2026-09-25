@@ -38,7 +38,7 @@ Apply the following changes:
 
 - Update the top comment to reference `knowledge.uchicago.edu`.
 
-### C. `docs/aws-setup.md`
+### C. `docs/setup/aws-setup.md`
 
 Update domain references and examples:
 
@@ -49,7 +49,7 @@ Update domain references and examples:
   - `--set "domainFilters[0]=knowledge.uchicago.edu"`
 - Remove basic auth secret creation guidance (`invenio-basic-auth`) from deployment steps.
 
-### D. `docs/upgrades.md`
+### D. `docs/maintenance/upgrades.md`
 
 - Update healthcheck URL from old hostname to `https://knowledge.uchicago.edu`.
 

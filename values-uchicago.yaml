@@ -168,7 +168,7 @@ rabbitmqExternal:
 opensearch:
   enabled: true
   ## Install repository-s3 at container start, for snapshots to S3.
-  ## See docs/aws-backups.md.
+  ## See docs/setup/aws-backups.md.
   plugins:
     enabled: true
     installList:
@@ -199,7 +199,7 @@ opensearch:
   ## Discovery uses the headless service, which includes not-ready pods, so a
   ## waiting node can still join and recover shards.
   ## If a rollout stalls because the cluster can't reach green for an
-  ## unrelated reason, see "Rolling restarts" in docs/aws-backups.md.
+  ## unrelated reason, see docs/maintenance/opensearch.md.
   readinessProbe:
     # null removes the chart's default tcpSocket check (Helm merges maps,
     # and a probe can only have one handler)

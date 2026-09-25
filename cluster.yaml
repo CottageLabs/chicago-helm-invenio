@@ -41,4 +41,4 @@ addons:
   - name: vpc-cni
   # amazon-cloudwatch-observability is installed imperatively, not declared
   # here - its serviceAccountRoleARN embeds the AWS account ID, which we
-  # don't want committed. See docs/aws-monitoring-and-alerting.md.
+  # don't want committed. See docs/setup/aws-monitoring-and-alerting.md.

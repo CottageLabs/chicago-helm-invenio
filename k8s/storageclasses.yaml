@@ -13,7 +13,7 @@ parameters:
   type: gp3
 ---
 ## EFS storage class for the Invenio shared volume (ReadWriteMany).
-## Requires the EFS filesystem ID to be set - see aws-setup.md.
+## Requires the EFS filesystem ID to be set - see docs/setup/aws-setup.md.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -29,7 +29,7 @@ parameters:
 ## import files, not for random writes or database use.
 ## Requires the aws-mountpoint-s3-csi-driver addon to be installed on the cluster
 ## and the node IAM role to have the s3-import-data-access inline policy.
-## See docs/aws-setup.md for setup instructions.
+## See docs/setup/aws-setup.md for setup instructions.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:

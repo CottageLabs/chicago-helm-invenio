@@ -1,8 +1,11 @@
 # CloudFront caching for uchicago.cottagelabs.com
 
+> **Status: not yet implemented** (as of September 2026). This is the plan;
+> nothing below has been set up.
+
 This document sets up a CloudFront distribution in front of the ALB to cache
-file downloads at the edge. Context: [Elastic Load Balancing cost turned out
-to be mostly Data Transfer Out](aws-backups.md) — 1.37 TB in June, 2.41 TB in
+file downloads at the edge. Context: Elastic Load Balancing cost turned out
+to be mostly Data Transfer Out — 1.37 TB in June, 2.41 TB in
 July, almost certainly record/dataset file downloads — not the load balancer
 itself. Repeat downloads of the same file currently re-transit the ALB every
 time; CloudFront caching them at the edge avoids that repeat egress.
@@ -31,7 +34,7 @@ alias record.
 CloudFront requires its certificate in `us-east-1` regardless of which region
 the distribution serves — this is a **separate** certificate from the
 existing one used by the ALB's listener in `us-east-2` (see the TLS section
-in `docs/aws-setup.md`); that one is untouched.
+in [aws-setup.md](aws-setup.md)); that one is untouched.
 
 ```bash
 CF_CERT_ARN=$(AWS_PROFILE=<your-profile> aws acm request-certificate \

@@ -48,17 +48,35 @@ Update `values-uchicago.yaml` with the new image tag and commit/push before proc
 helm dependency update charts/invenio
 ```
 
-### 3. Dry-run to check for issues
+### 3. Check what the upgrade will change
+
+The deployed release can differ from the repo — values committed but not yet
+deployed, or changes made in the cluster by hand (e.g. the `web` HPA's
+`maxReplicas` was set with `kubectl patch` in September 2026) — so an upgrade
+may apply more than the change you're making. Compare a server-side dry run
+against the deployed manifest:
 
 ```bash
+helm -n invenio get manifest invenio > /tmp/deployed.yaml
+
 helm upgrade invenio charts/invenio \
   --namespace invenio \
   --values values-uchicago.yaml \
   --values values-uchicago-private.yaml \
-  --dry-run
+  --dry-run=server \
+  | awk '/^MANIFEST:/{m=1; next} /^NOTES:/{m=0} m' > /tmp/new.yaml
+
+diff -u /tmp/deployed.yaml /tmp/new.yaml
 ```
 
-Review the diff for any unexpected changes before applying.
+Use `--dry-run=server`: `Secret/invenio` uses `lookup` to keep its existing
+values, and a client-side dry run (or `helm template`) can't see the cluster,
+so it shows every app secret regenerating when a real upgrade wouldn't change
+them.
+
+Any change to the OpenSearch StatefulSet (including its ConfigMap, via the
+`configchecksum` annotation) restarts all three OpenSearch nodes one at a
+time; see [opensearch.md](opensearch.md#rolling-restarts-and-the-readiness-probe).
 
 ### 4. Apply the upgrade
 
@@ -76,6 +94,14 @@ kubectl get all -n invenio
 kubectl rollout status deployment/invenio-web -n invenio
 kubectl rollout status deployment/invenio-worker -n invenio
 kubectl get pods -n invenio
+```
+
+If the OpenSearch StatefulSet changed, also wait for it; each node waits for
+the cluster to be `green` before the next restarts, so this takes 10–15
+minutes:
+
+```bash
+kubectl rollout status statefulset/invenio-opensearch-master -n invenio
 ```
 
 ### 6. Run a smoke test
@@ -96,6 +122,15 @@ helm rollback invenio -n invenio
 
 Use this procedure when you need a clean reinstall (e.g. after a failed initial
 deployment) without losing persistent data in RDS or EFS.
+
+> **On production, this procedure destroys the view and download statistics
+> unless you snapshot and restore them.** The statistics exist only in
+> OpenSearch. Deleting the OpenSearch PVCs removes them, and even if the PVCs
+> are kept, the init job runs `invenio index destroy --yes-i-know`, which
+> deletes every index, stats included. The snapshot repository registration
+> and the `daily-snapshots` policy live in the OpenSearch cluster too, so they
+> are lost as well. See [Reinstalling production](#reinstalling-production)
+> below.
 
 ### What persists across a reinstall
 
@@ -140,6 +175,44 @@ kubectl logs -n invenio -l job-name=invenio-install-init -f
 The job may restart once if OpenSearch isn't ready when it first runs — this is
 expected. Once it completes, set `invenio.init: false` and run `helm upgrade` to
 prevent it running again on future upgrades.
+
+### Reinstalling production
+
+Before `helm uninstall`, take a final snapshot of the statistics (the
+snapshots themselves are in S3 and survive):
+
+```bash
+os() { kubectl -n invenio exec invenio-opensearch-master-0 -c opensearch -- \
+  curl -s -H 'Content-Type: application/json' "$@"; }
+
+os -X PUT 'localhost:9200/_snapshot/s3-snapshots/pre-reinstall?wait_for_completion=true' -d '{
+  "indices": "chicago-invenio-*",
+  "include_global_state": false
+}'
+os 'localhost:9200/_cat/snapshots/s3-snapshots?v' | grep pre-reinstall   # must be SUCCESS
+```
+
+Then follow the procedure above. Once the init job has completed:
+
+1. Register the snapshot repository again
+   ([setup step 3.5](../setup/aws-backups.md#35-register-the-snapshot-repository)).
+2. Restore the statistics indices from `pre-reinstall`. The init job will
+   have created empty stats indices with the same names, so delete those
+   first:
+   ```bash
+   os -X DELETE 'localhost:9200/chicago-invenio-stats-*,chicago-invenio-events-stats-*'
+   os -X POST 'localhost:9200/_snapshot/s3-snapshots/pre-reinstall/_restore?wait_for_completion=true' -d '{
+     "indices": "chicago-invenio-stats-*,chicago-invenio-events-stats-*",
+     "include_global_state": false
+   }'
+   ```
+3. Recreate the `daily-snapshots` policy
+   ([setup step 3.6](../setup/aws-backups.md#36-create-the-snapshot-management-policy)).
+4. Rebuild the search indices from the database:
+   `kubectl -n invenio exec deploy/invenio-web -c web -- invenio rdm rebuild-all-indices`.
+
+`invenio.init` is still `true` in `values-uchicago.yaml`. It only runs on
+`helm install` (it's a `post-install` hook), not on upgrades.
 
 ---
 

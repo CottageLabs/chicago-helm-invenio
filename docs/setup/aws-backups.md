@@ -1,7 +1,9 @@
 # Backups for chicago-invenio
 
 This document describes how the production UChicago InvenioRDM instance is
-backed up, how to set the backups up, and how to restore from them.
+backed up, and how the backups were set up. For checking backups and
+restoring from them, see
+[maintenance/backups-and-restores.md](../maintenance/backups-and-restores.md).
 
 ## What needs backing up
 
@@ -40,16 +42,11 @@ restorable copy per index.
 
 ### Restoring the database and files together
 
-The database records which files belong to which record; the files themselves
-are on EFS. When restoring both, restore them to the **same point in time**,
-otherwise records can point at files that don't exist (or files exist that no
-record references). All scheduled backups start at 08:00 UTC for this reason.
-Retention is aligned so that a matching pair always exists:
-
-- **Last 14 days:** a daily EFS recovery point, plus RDS point-in-time
-  recovery to that recovery point's exact completion time.
-- **Last year:** the weekly EFS and weekly RDS recovery points from the same
-  Sunday.
+The database records which files belong to which record, and the files live
+on EFS, so they must be restored to the same point in time. Retention is
+aligned so that a matching pair always exists (daily for 14 days, weekly for
+a year), and all scheduled backups start at 08:00 UTC. The procedure is in
+[maintenance/backups-and-restores.md](../maintenance/backups-and-restores.md#restoring-the-database-and-files-together).
 
 ---
 
@@ -345,7 +342,7 @@ Cross-region copies add data transfer and a second copy of storage.
 ## Part 2 — RDS native automated backups
 
 Automated backups are enabled when the instance is created (see the RDS
-section of `docs/aws-setup.md`, which uses 14 days' retention and deletion
+section of [aws-setup.md](aws-setup.md), which uses 14 days' retention and deletion
 protection). Retention is 14 days to match the daily EFS backups. The
 production instance was originally created with 7, and was raised with:
 
@@ -490,7 +487,7 @@ so it repeats the existing lines and adds the `s3.client.default.*` settings.
 opensearch:
   enabled: true
   ## Install repository-s3 at container start, for snapshots to S3.
-  ## See docs/aws-backups.md.
+  ## See docs/setup/aws-backups.md.
   plugins:
     enabled: true
     installList:
@@ -521,7 +518,7 @@ opensearch:
   ## Discovery uses the headless service, which includes not-ready pods, so a
   ## waiting node can still join and recover shards.
   ## If a rollout stalls because the cluster can't reach green for an
-  ## unrelated reason, see "Rolling restarts" in docs/aws-backups.md.
+  ## unrelated reason, see docs/maintenance/opensearch.md.
   readinessProbe:
     # null removes the chart's default tcpSocket check (Helm merges maps,
     # and a probe can only have one handler)
@@ -575,7 +572,7 @@ What each part is for:
   allowed to read it. Setting at least one IRSA option is also what makes the
   plugin read `AWS_ROLE_ARN` from the environment.
 - `readinessProbe` — makes rolling restarts wait for `green`; see
-  [Rolling restarts](#rolling-restarts-and-the-readiness-probe) below.
+  [maintenance/opensearch.md](../maintenance/opensearch.md#rolling-restarts-and-the-readiness-probe).
 
 The role ARN contains the account ID, so it goes in
 `values-uchicago-private.yaml` (gitignored). The plugin reads `AWS_ROLE_ARN`
@@ -601,22 +598,10 @@ Notes:
 
 ### 3.4 Roll out
 
-**Check what the upgrade will change first.** The Helm release can lag behind
-the repo (or the cluster can have been changed by hand), so an upgrade may
-apply more than you expect. Compare a server-side dry run against the
-deployed manifest:
-
-```bash
-helm -n invenio get manifest invenio > /tmp/deployed.yaml
-helm upgrade invenio ./charts/invenio -n invenio \
-  -f values-uchicago.yaml -f values-uchicago-private.yaml \
-  --dry-run=server > /tmp/dry-run.txt
-# then diff /tmp/deployed.yaml against the MANIFEST: section of /tmp/dry-run.txt
-```
-
-Use `--dry-run=server`, not `helm template`: `Secret/invenio` uses `lookup`
-to keep its existing values, and `helm template` has no cluster access, so it
-shows every app secret regenerating when a real upgrade wouldn't change them.
+Check what the upgrade will change first, as in
+[maintenance/upgrades.md](../maintenance/upgrades.md#3-check-what-the-upgrade-will-change):
+the Helm release can lag behind the repo, so an upgrade may apply more than
+you expect.
 
 Then, with the cluster `green`:
 
@@ -638,45 +623,10 @@ kubectl -n invenio exec invenio-opensearch-master-0 -c opensearch -- \
   curl -s 'localhost:9200/_cat/plugins?v&h=name,component' | grep repository-s3
 ```
 
-#### Rolling restarts and the readiness probe
-
-The OpenSearch chart's default readiness probe only checks that port 9200 is
-open. During a rolling restart, Kubernetes therefore restarts the next node as
-soon as the previous one opens its port — before its shards have recovered.
-The first rollout of this change hit exactly that: the cluster went `red`
-briefly and was down to two nodes with 163 unassigned replicas when the next
-node was taken down.
-
-The `readinessProbe` in 3.3 fixes this. A newly started container is only
-Ready once the cluster reports `green`; the probe then records that in
-`/tmp/.opensearch-reached-green` and from then on only checks that HTTP
-responds. So:
-
-- a rolling restart waits for `green` between nodes;
-- a running cluster that later goes `yellow` (e.g. a node restarting) doesn't
-  pull every node out of the `invenio-opensearch-master` Service that Invenio
-  connects through;
-- a waiting node can still join the cluster and recover shards, because
-  discovery uses the headless service, which includes not-ready pods.
-
-If a rollout stalls on a node that's `Running` but `0/1` Ready, the cluster
-can't reach `green`. Find out why before forcing it:
-
-```bash
-kubectl -n invenio exec invenio-opensearch-master-0 -c opensearch -- \
-  curl -s 'localhost:9200/_cluster/allocation/explain?pretty'
-```
-
-A common cause is a node's disk passing the 85% low watermark, so replicas
-can't be allocated (see the note on disk usage under *Cost*). Once it's
-understood, the gate can be released by hand on the waiting pod:
-
-```bash
-kubectl -n invenio exec <pod> -c opensearch -- touch /tmp/.opensearch-reached-green
-```
-
-When the security plugin is enabled (the `FIXME` in `opensearch.yml`), the
-probe's `curl` commands will need credentials and HTTPS.
+The OpenSearch readiness probe (3.3) makes each node wait for the cluster to
+be `green` before Kubernetes restarts the next one. See
+[maintenance/opensearch.md](../maintenance/opensearch.md#rolling-restarts-and-the-readiness-probe)
+for how it works and what to do if a rollout stalls.
 
 ### 3.5 Register the snapshot repository
 
@@ -712,7 +662,7 @@ so each daily snapshot only uploads what's new.
 
 ```bash
 os -X POST 'localhost:9200/_plugins/_sm/policies/daily-snapshots' -d '{
-  "description": "Daily snapshot of chicago-invenio indices to S3 (see docs/aws-backups.md)",
+  "description": "Daily snapshot of chicago-invenio indices to S3 (see docs/setup/aws-backups.md)",
   "creation": {
     "schedule": { "cron": { "expression": "0 8 * * *", "timezone": "UTC" } }
   },
@@ -755,166 +705,10 @@ scheduled ones are running:
 
 ---
 
-## Part 4 — Restoring
+## Part 4 — Checking and restoring
 
-Untested backups aren't backups. Recommended cadence for a test restore of
-each: **quarterly**.
-
-### 4.1 Uploaded files (EFS)
-
-List recovery points:
-
-```bash
-aws backup list-recovery-points-by-resource --region us-east-2 \
-  --resource-arn arn:aws:elasticfilesystem:us-east-2:${AWS_ACCOUNT}:file-system/fs-0e8f6bacbcc4515bf \
-  --query 'RecoveryPoints[*].{Arn:RecoveryPointArn,Created:CreationDate,Status:Status}' \
-  --output table
-```
-
-The Invenio volume is an EFS access point rooted at
-`/pvc-619771b2-c302-4e87-9ad6-767289544248` on the filesystem; paths in a
-restore are relative to the filesystem root, so they start with that prefix.
-
-AWS Backup EFS restores never overwrite existing files. Restoring to the
-**existing** filesystem writes into a new `aws-backup-restore_<timestamp>`
-directory at the filesystem root, from which files can be copied back
-(e.g. from the terminal pod, after mounting the root). Restoring to a **new**
-filesystem creates a separate filesystem entirely — use this for test
-restores.
-
-**Item-level restore** (specific files or directories, up to 10 paths) into
-the existing filesystem — the common case for "a file was deleted":
-
-```bash
-cat > /tmp/efs-restore-metadata.json <<'EOF'
-{
-  "file-system-id": "fs-0e8f6bacbcc4515bf",
-  "newFileSystem": "false",
-  "ItemsToRestore": "[\"/pvc-619771b2-c302-4e87-9ad6-767289544248/<path/under/data>\"]"
-}
-EOF
-
-aws backup start-restore-job --region us-east-2 \
-  --recovery-point-arn <recovery-point-arn> \
-  --iam-role-arn arn:aws:iam::${AWS_ACCOUNT}:role/AWSBackupDefaultServiceRole \
-  --metadata file:///tmp/efs-restore-metadata.json
-```
-
-Invenio stores each file under a path derived from its file instance ID
-(e.g. `ab/cd/…/data`); the path for a given file is the `uri` column of the
-`files_files` table.
-
-**Full test restore** to a new filesystem:
-
-```bash
-cat > /tmp/efs-restore-metadata.json <<'EOF'
-{
-  "newFileSystem": "true",
-  "CreationToken": "chicago-invenio-restore-test",
-  "Encrypted": "true",
-  "PerformanceMode": "generalPurpose"
-}
-EOF
-```
-
-then run the same `start-restore-job`. Spot-check files on the new filesystem
-(it needs a mount target in the cluster's subnets to be mounted from a pod),
-then delete it — a full copy of ~720 GB costs roughly $200/month in EFS
-Standard while it exists.
-
-See the
-[AWS Backup EFS restore reference](https://docs.aws.amazon.com/aws-backup/latest/devguide/restoring-efs.html)
-for all metadata fields.
-
-### 4.2 Database (RDS)
-
-Every RDS restore creates a **new** instance; the original is untouched.
-
-Within the last 14 days — point-in-time recovery, e.g. to match an EFS recovery
-point's completion time:
-
-```bash
-aws rds restore-db-instance-to-point-in-time --region us-east-2 \
-  --source-db-instance-identifier chicago-invenio \
-  --target-db-instance-identifier chicago-invenio-restore \
-  --restore-time <YYYY-MM-DDTHH:MM:SSZ> \
-  --db-subnet-group-name <same as source> \
-  --vpc-security-group-ids <same as source>
-```
-
-Older than 14 days — from a weekly AWS Backup recovery point:
-
-```bash
-aws backup list-recovery-points-by-resource --region us-east-2 \
-  --resource-arn arn:aws:rds:us-east-2:${AWS_ACCOUNT}:db:chicago-invenio \
-  --query 'RecoveryPoints[*].{Arn:RecoveryPointArn,Created:CreationDate}' --output table
-
-# Shows the restore metadata AWS Backup expects, pre-filled from the source
-aws backup get-recovery-point-restore-metadata --region us-east-2 \
-  --backup-vault-name chicago-invenio-backup-vault \
-  --recovery-point-arn <recovery-point-arn>
-```
-
-Edit that metadata (set a new `DBInstanceIdentifier`), save it as JSON, and
-pass it to `aws backup start-restore-job` as in 4.1.
-
-To switch Invenio over to a restored instance, set
-`postgresqlExternal.hostname` in `values-uchicago-private.yaml` to the new
-endpoint and `helm upgrade`. Then rebuild the search indices so they match
-the restored database:
-
-```bash
-kubectl -n invenio exec deploy/invenio-web -c web -- invenio rdm rebuild-all-indices
-```
-
-For a test, connect to the restored instance, run a few sanity queries
-(record counts, a recent record), then delete it.
-
-### 4.3 Statistics (OpenSearch)
-
-```bash
-os 'localhost:9200/_cat/snapshots/s3-snapshots?v&s=end_epoch'
-```
-
-**Test restore** — restore one index under a different name and compare it.
-The OpenSearch volumes are only 8Gi each and over half full, so test with a
-single small index, not everything:
-
-```bash
-os -X POST 'localhost:9200/_snapshot/s3-snapshots/<snapshot>/_restore?wait_for_completion=true' -d '{
-  "indices": "chicago-invenio-stats-record-view-2026",
-  "include_global_state": false,
-  "include_aliases": false,
-  "rename_pattern": "chicago-invenio-(.+)",
-  "rename_replacement": "restoretest-$1"
-}'
-
-os 'localhost:9200/_cat/indices/chicago-invenio-stats-record-view-2026,restoretest-*?v&h=index,docs.count'
-
-os -X DELETE 'localhost:9200/restoretest-*'
-```
-
-**Real restore** — an index can't be restored over an open index with the
-same name. Delete (or close) the damaged indices first, then restore them
-with their aliases:
-
-```bash
-os -X DELETE 'localhost:9200/<damaged-index>'
-
-os -X POST 'localhost:9200/_snapshot/s3-snapshots/<snapshot>/_restore' -d '{
-  "indices": "<damaged-index>",
-  "include_global_state": false
-}'
-```
-
-Events recorded between the snapshot and the restore are lost for the
-restored indices. Search (non-stats) indices don't need restoring from a
-snapshot; rebuild them with `invenio rdm rebuild-all-indices`.
-
-For a total loss of the OpenSearch cluster: bring up a fresh cluster with the
-same chart values, register the repository (3.5), restore
-`chicago-invenio-stats-*,chicago-invenio-events-stats-*` from the latest
-snapshot, then run `invenio rdm rebuild-all-indices` for the rest.
+Checking that backups ran, and restoring from them, is covered in
+[maintenance/backups-and-restores.md](../maintenance/backups-and-restores.md).
 
 ---
 
@@ -942,14 +736,9 @@ slower and incurs a cold-storage restore fee — see
 Tag all resources `project=chicago-invenio` (as the commands above do) so they
 appear in the project's Cost Explorer view.
 
-### OpenSearch disk usage
-
-Not a backup cost, but it affects backups: the OpenSearch PVCs are 8Gi each
-and were 57–62% full in September 2026, with the stats indices growing by
-several hundred MB a month. At 85% a node stops receiving new shards, the
-cluster can't get back to `green`, and rolling restarts stall (see 3.4).
-Snapshots of a `yellow` cluster still succeed, since they copy primaries, but
-plan a volume resize (the `gp3` StorageClass allows expansion) before then.
+See also [OpenSearch disk usage](../maintenance/opensearch.md#disk-usage):
+the OpenSearch volumes need resizing before they fill, or rolling restarts
+will stall.
 
 ---
 
@@ -979,7 +768,7 @@ left out.
 
 Still to do:
 
-- Check the first scheduled runs: EFS (26 Sep), OpenSearch (26 Sep), RDS weekly (27 Sep), with the commands in 1.5 and 3.7.
+- Check the first scheduled runs: EFS (26 Sep), OpenSearch (26 Sep), RDS weekly (27 Sep), with the commands in [maintenance/backups-and-restores.md](../maintenance/backups-and-restores.md#checking-backups-ran).
 - Delete the `manual-initial` snapshot once scheduled snapshots exist.
-- First quarterly test restore of each (Part 4).
+- First quarterly test restore of each ([maintenance/backups-and-restores.md](../maintenance/backups-and-restores.md#restoring)).
 

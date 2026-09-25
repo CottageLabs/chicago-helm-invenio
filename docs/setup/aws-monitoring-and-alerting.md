@@ -14,7 +14,7 @@ pods`. This setup closes that gap: it alerts on the *Kubernetes-level*
 signals (node conditions, pod restarts) that AWS's own infrastructure
 monitoring doesn't cover.
 
-See also [`../charts/invenio/values-uchicago.yaml`](../values-uchicago.yaml)
+See also [`../charts/invenio/values-uchicago.yaml`](../../values-uchicago.yaml)
 `opensearch.antiAffinity: "hard"`, added at the same time to stop OpenSearch
 master pods from being able to land on the same node in the first place.
 
