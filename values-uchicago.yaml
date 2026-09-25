@@ -41,6 +41,14 @@ invenio:
   extraConfig:
     # uchicago.cottagelabs.com is listed in ingress.extraHosts above.
     INVENIO_TRUSTED_HOSTS: '["knowledge.uchicago.edu", "uchicago.cottagelabs.com"]'
+    # Take the client IP from X-Forwarded-For so rate limiting and usage stats
+    # see visitors rather than the ALB's private IPs. x_for is the number of
+    # trusted proxies that append to the header the app receives: only the ALB
+    # (nginx's own X-Forwarded-For uwsgi_param isn't the HTTP header the app
+    # reads). Adding CloudFront in front of the ALB makes this 2.
+    # x_proto stays 0 so the URL scheme the app sees is unchanged.
+    # See docs/setup/aws-cost-reductions.md.
+    INVENIO_PROXYFIX_CONFIG: '{"x_for": 1, "x_proto": 0}'
   extraEnvFrom:
     - secretRef:
         name: invenio-mail-secret
@@ -99,8 +107,13 @@ web:
   readinessProbe:
     failureThreshold: 5
     timeoutSeconds: 5
+  ## uwsgi takes ~30-36s to load the app in each of its 4 workers (measured
+  ## Sept 2026), so the startup probe allows ~110s (10s initial delay +
+  ## 20 x 5s period). With 5, pods starting on a busy node were killed before
+  ## the app finished loading. Only applies until the first success; an app
+  ## that fails to import exits straight away regardless.
   startupProbe:
-    failureThreshold: 5
+    failureThreshold: 20
     timeoutSeconds: 5
   resources:
     requests:

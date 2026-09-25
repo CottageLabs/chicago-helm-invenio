@@ -24,7 +24,7 @@ August 2026, from Cost Explorer (tagged `project=chicago-invenio`):
 | Change | Status | Estimated saving |
 |---|---|---|
 | [EFS Infrequent Access tiering](#efs-infrequent-access-tiering) | Done, 25 Sep 2026 | ~$150–170/month |
-| [Correct visitor IP addresses](#correct-visitor-ip-addresses-planned) | Planned | None directly; fixes rate limiting and stats, and is needed before CloudFront |
+| [Correct visitor IP addresses](#correct-visitor-ip-addresses) | Done, 25 Sep 2026 | None directly; fixes rate limiting and stats, and is needed before CloudFront |
 | [CloudFront in front of the ALB](#cloudfront-planned) | Planned | ~$85/month (pay-as-you-go) to ~$135/month (Pro plan) |
 | [Compute Savings Plan](#compute-savings-plan-not-pursued) | Not pursued | ~25–30% of EC2 on-demand spend |
 
@@ -113,34 +113,81 @@ there until read with `AFTER_1_ACCESS` set).
 
 ---
 
-## Correct visitor IP addresses (planned)
+## Correct visitor IP addresses
 
 Not a saving in itself, but a prerequisite for CloudFront and a bug in its
-own right.
+own right. Fixed 25 September 2026 (Helm revision 47).
 
-**Problem.** Invenio doesn't see visitors' real IP addresses: it sees the
-ALB's private IPs (`192.168.20.25`, `192.168.36.255`, `192.168.64.9` in
-September 2026). Invenio only honours `X-Forwarded-For` when `WSGI_PROXIES`
-(or `PROXYFIX_CONFIG`) is set, and neither is. Confirmed from the rate
-limiter's keys in Redis, which contain the user agent plus an ALB IP.
+**Problem.** Invenio saw the ALB's private IPs (`192.168.20.25`,
+`192.168.36.255`, `192.168.64.9`) as every visitor's address, because it only
+honours `X-Forwarded-For` when `PROXYFIX_CONFIG` (or the deprecated
+`WSGI_PROXIES`) is set, and neither was. Confirmed from the rate limiter's
+keys in Redis, which contained the user agent plus an ALB IP.
 
-**Effect.**
+**Effect, before the fix.**
 
-- *Rate limiting*: anonymous visitors are limited per user agent and ALB node,
-  so everyone using the same browser version shares one 500-requests-a-minute
-  limit per ALB node. A busy period could produce 429 errors for real users.
+- *Rate limiting*: anonymous visitors were limited per user agent and ALB
+  node, so everyone using the same browser version shared one
+  500-requests-a-minute limit per ALB node.
 - *Statistics*: invenio-stats identifies visitors by IP address plus user
-  agent, so different people using the same browser are merged, and unique
-  visitor counts are likely understated.
+  agent, so different people using the same browser were merged and unique
+  visitor counts were understated. **Expect a step up in unique-visitor
+  figures from 25 September 2026**; download and view counts shouldn't change
+  much.
 
-**Fix (to be worked out).** Set `INVENIO_WSGI_PROXIES` to the number of
-proxies in front of the app. Today the chain is ALB → nginx, so
-`X-Forwarded-For` reaching the app is `<client>, <ALB IP>` and the value would
-be 2. CloudFront adds a hop, making it 3. Because traffic moves between the
-two paths gradually during a DNS change, an alternative is nginx's `real_ip`
-module with trusted ranges (the VPC and CloudFront's published ranges), which
-handles both. Needs testing either way: a wrong value lets clients spoof
-their IP.
+**Fix.** In `values-uchicago.yaml`, under `invenio.extraConfig` (rendered into
+the `invenio-config` ConfigMap, which web and worker pods load as
+environment variables):
+
+```yaml
+INVENIO_PROXYFIX_CONFIG: '{"x_for": 1, "x_proto": 0}'
+```
+
+Invenio parses `INVENIO_*` variables with `ast.literal_eval`, so this becomes
+a dict and `invenio_base.wsgi.wsgi_proxyfix` wraps the app in
+`werkzeug.middleware.proxy_fix.ProxyFix(x_for=1, x_proto=0)`. No change to
+the application image or `settings.py` is needed. Deployment topology belongs
+in the Helm values.
+
+**Why `x_for: 1`.** `x_for` is the number of trusted proxies that append to the
+`X-Forwarded-For` header the app receives, and the app uses the entry that
+many places from the right.
+
+- The ALB is in `append` mode (`routing.http.xff_header_processing.mode`), so
+  it adds the connecting client's IP to whatever the client sent.
+- nginx's `uwsgi_param X-Forwarded-For $proxy_add_x_forwarded_for` sets a
+  separate uwsgi variable, not the `HTTP_X_FORWARDED_FOR` header the app
+  reads, so it adds nothing.
+- Measured in the uwsgi logs (which log `X-Forwarded-For`), 6 hours before
+  the change: 25,218 requests with one entry (the client) and 272 with two,
+  such as `127.0.0.1, 45.148.10.18` — clients spoofing a first entry, with
+  their real IP appended by the ALB. `x_for: 1` uses the ALB's entry, so
+  spoofed values are ignored; `x_for: 2` would let those clients choose their
+  address.
+
+**Why `x_proto: 0`.** `ProxyFix` trusts `X-Forwarded-Proto` by default, which
+would change the URL scheme the app sees from `http` to `https`. That's a
+separate change with its own risks, so it's left off.
+
+**Use `PROXYFIX_CONFIG`, not `WSGI_PROXIES`.** `WSGI_PROXIES` is deprecated
+and also trusts `X-Forwarded-Proto`. (`invenio_base`'s `WERKZEUG_GTE_014`
+flag reads backwards — it's `False` on modern Werkzeug — so both settings do
+work.)
+
+**Tested before deploying** by building the app in a web pod with the new
+variable and passing production-shaped headers through the wrapped app:
+`X-Forwarded-For: 128.135.204.120` → `remote_addr` `128.135.204.120`;
+`127.0.0.1, 45.148.10.18` → `45.148.10.18`; scheme unchanged.
+
+**Verified after deploying:** new rate-limiter keys in Redis contain public
+IPs.
+
+**With CloudFront**, the chain becomes CloudFront → ALB → nginx: CloudFront
+appends the viewer's IP, then the ALB appends CloudFront's, so `x_for` must
+become 2 when the DNS switch happens. Requests still reaching the ALB
+directly during the switch have only one entry; `ProxyFix` leaves the address
+unchanged when there are fewer entries than `x_for`, so those fall back to
+the ALB IP rather than being spoofable.
 
 ---
 
@@ -175,10 +222,36 @@ use:
   us-east-1 certificate covering it. `knowledge.uchicago.edu` is a CNAME to
   `uchicago.cottagelabs.com`, so switching the Route 53 record moves both,
   but validating the certificate needs a DNS record from UChicago IT.
-- **Fix visitor IPs** at the same time (see above).
+- **Change `PROXYFIX_CONFIG` to `x_for: 2`** at the DNS switch (see [above](#correct-visitor-ip-addresses)).
 - **Test** logins, large uploads, downloads, and that stats are still
   recorded, before switching DNS. Rollback is re-pointing the Route 53 record
   at the ALB.
+
+### Why not Cloudflare
+
+`cottagelabs.com` is on Cloudflare, but that doesn't cover this site.
+`uchicago.cottagelabs.com` is **delegated** from the Cloudflare zone to Route
+53 with NS records, and Cloudflare only proxies A/AAAA/CNAME records in its
+own zone. The hostname resolves straight to the ALB (no `cf-ray` header), so
+none of this traffic goes through Cloudflare today.
+
+Moving it onto Cloudflare's proxy instead of adding CloudFront wouldn't save
+the money:
+
+- **The saving depends on free origin transfer, which only CloudFront gets.**
+  AWS waives data transfer from the ALB to CloudFront. Cloudflare is just
+  another internet client to AWS, so every uncached byte would still be
+  billed at $0.09/GB. Cloudflare would only save money by *caching* file
+  downloads, with the restricted-file risk above.
+- **`knowledge.uchicago.edu` wouldn't work** without Cloudflare for SaaS
+  (custom hostnames, a paid add-on) or UChicago moving its own DNS to
+  Cloudflare. It's a CNAME into another Cloudflare account's zone, which
+  Cloudflare rejects.
+- **Upload size**: Cloudflare's Free and Pro plans cap request bodies at
+  100 MB.
+- **Terms**: Cloudflare's self-serve plans restrict using the CDN mainly to
+  serve large volumes of non-HTML files, which is what this site's traffic
+  is.
 
 ---
 
@@ -197,6 +270,8 @@ shares it.
 | Date | Change |
 |---|---|
 | 25 Sep 2026 | EFS lifecycle policy `TransitionToIA: AFTER_30_DAYS` on `fs-0e8f6bacbcc4515bf`. CloudWatch alarm `chicago-invenio-efs-burst-credits-low` created. |
+| 25 Sep 2026 | `INVENIO_PROXYFIX_CONFIG` set (Helm revision 47). During the rollout, three new web pods were restarted by their startup probe before the app finished loading — fixed in revision 48 (next row). |
+| 25 Sep 2026 | Web `startupProbe.failureThreshold` 5 → 20 (Helm revision 48); see [maintenance/upgrades.md](../maintenance/upgrades.md#web-pod-startup-time). |
 
 Follow-ups:
 

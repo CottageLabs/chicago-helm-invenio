@@ -104,6 +104,34 @@ minutes:
 kubectl rollout status statefulset/invenio-opensearch-master -n invenio
 ```
 
+#### Web pod startup time
+
+Each web pod's uwsgi loads the app in all 4 worker processes at once, which
+takes 28–36 seconds (measured September 2026) and longer on a busy node. The
+web container's startup probe allows about 110 seconds (10 s initial delay +
+`failureThreshold` 20 × 5 s period, set in `values-uchicago.yaml`).
+
+History, in case it needs changing again:
+
+- The chart default is `failureThreshold: 3` (~25 s).
+- July 2026 (`61d6465`): raised to 5 (~35 s) when `web.uwsgi.processes` went
+  from 2 to 4, which made startup slower.
+- 25 September 2026 (revision 48): raised to 20. With 5, three of the six new
+  pods in the previous rollout were killed mid-startup and restarted
+  (`SIGINT/SIGTERM received` followed by a `KeyboardInterrupt` inside
+  `create_app` in the previous container's log).
+
+The startup probe only runs until the container first passes, so a longer
+window doesn't slow detection of later failures. An app that can't import
+exits straight away regardless.
+
+If pods restart during a rollout, compare the `WSGI app 0 ... ready in N
+seconds` lines in the web container's log with the probe window:
+
+```bash
+kubectl -n invenio logs <pod> -c web --previous | grep 'ready in'
+```
+
 ### 6. Run a smoke test
 
 ```bash
