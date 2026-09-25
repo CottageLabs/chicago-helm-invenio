@@ -1,7 +1,9 @@
 # CloudFront caching for uchicago.cottagelabs.com
 
-> **Status: not yet implemented** (as of September 2026). This is the plan;
-> nothing below has been set up.
+> **Status: not yet implemented** (as of September 2026), and **needs
+> rewriting before use**: see [aws-cost-reductions.md](aws-cost-reductions.md#cloudfront-planned)
+> for the revised approach (no caching; add `knowledge.uchicago.edu`; fix
+> visitor IPs) and the cost analysis.
 
 This document sets up a CloudFront distribution in front of the ALB to cache
 file downloads at the edge. Context: Elastic Load Balancing cost turned out

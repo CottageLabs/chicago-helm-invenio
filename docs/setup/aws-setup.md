@@ -392,6 +392,26 @@ kubectl patch storageclass gp2 \
   -p '{"metadata": {"annotations": {"storageclass.kubernetes.io/is-default-class": "false"}}}'
 ```
 
+### 5. Move rarely read files to Infrequent Access
+
+Uploaded files are mostly written once and rarely read again, so move files
+not read for 30 days to the much cheaper Infrequent Access storage class.
+They stay there when read (reads from IA cost $0.01/GB) rather than moving
+back to Standard.
+
+```bash
+AWS_PROFILE=<your-profile> aws efs put-lifecycle-configuration \
+  --file-system-id ${EFS_ID} \
+  --lifecycle-policies '[{"TransitionToIA":"AFTER_30_DAYS"}]' \
+  --region us-east-2
+```
+
+With Bursting throughput, the filesystem's baseline throughput scales with
+the data left in Standard, so this also lowers the baseline. See
+[aws-cost-reductions.md](aws-cost-reductions.md#efs-infrequent-access-tiering)
+for the costs, the throughput measurements behind this decision, and the
+burst-credit alarm that watches for it.
+
 ---
 
 ## S3 bucket mount (import data)

@@ -201,11 +201,42 @@ normal rolling deploy causes a brief one-off restart per pod too, which
 could trip this if timed unluckily. If it's noisy in practice, raise
 `--threshold` or `--datapoints-to-alarm`, or add more evaluation periods.
 
+### 4. EFS burst credits alarm
+
+The EFS filesystem uses Bursting throughput, whose baseline scales with the
+data in the Standard storage class. Since most files are moved to Infrequent
+Access (see [aws-cost-reductions.md](aws-cost-reductions.md#efs-infrequent-access-tiering)),
+the baseline is low, so this alarm fires if throughput demand starts
+drawing down the burst credits (normally full at 2.1 TiB). If it fires,
+look at the `MeteredIOBytes` and `BurstCreditBalance` metrics, and consider
+switching to Elastic throughput.
+
+```bash
+AWS_PROFILE=<your-profile> aws cloudwatch put-metric-alarm \
+  --alarm-name "chicago-invenio-efs-burst-credits-low" \
+  --alarm-description "EFS fs-0e8f6bacbcc4515bf burst credits below 1 TiB: throughput demand is exceeding the baseline (which scales with data in EFS Standard). See docs/setup/aws-cost-reductions.md" \
+  --namespace AWS/EFS \
+  --metric-name BurstCreditBalance \
+  --dimensions Name=FileSystemId,Value=fs-0e8f6bacbcc4515bf \
+  --statistic Minimum \
+  --period 3600 \
+  --evaluation-periods 1 \
+  --threshold 1099511627776 \
+  --comparison-operator LessThanThreshold \
+  --treat-missing-data notBreaching \
+  --alarm-actions arn:aws:sns:us-east-2:${AWS_ACCOUNT}:chicago-invenio-alerts \
+  --ok-actions arn:aws:sns:us-east-2:${AWS_ACCOUNT}:chicago-invenio-alerts \
+  --tags Key=project,Value=chicago-invenio \
+  --region us-east-2
+```
+
+The threshold is 1 TiB in bytes.
+
 ### Verify
 
 ```bash
 AWS_PROFILE=<your-profile> aws cloudwatch describe-alarms \
-  --alarm-names chicago-invenio-node-failure chicago-invenio-pod-crashlooping \
+  --alarm-names chicago-invenio-node-failure chicago-invenio-pod-crashlooping chicago-invenio-efs-burst-credits-low \
   --region us-east-2 \
   --query "MetricAlarms[].[AlarmName,StateValue]" --output text
 ```
