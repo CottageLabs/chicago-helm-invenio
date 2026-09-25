@@ -167,3 +167,70 @@ rabbitmqExternal:
 
 opensearch:
   enabled: true
+  ## Install repository-s3 at container start, for snapshots to S3.
+  ## See docs/aws-backups.md.
+  plugins:
+    enabled: true
+    installList:
+      - repository-s3
+  ## Dedicated service account, matched by the IRSA role's trust policy.
+  rbac:
+    create: true
+    serviceAccountName: invenio-opensearch
+  config:
+    opensearch.yml: |
+      cluster.name: invenio-opensearch
+      network.host: 0.0.0.0
+      # FIXME: re-enable security and configure TLS/auth
+      plugins:
+        security:
+          disabled: true
+      s3.client.default.region: us-east-2
+      # Regional endpoint: the global s3.amazonaws.com endpoint 307-redirects
+      # requests for buckets outside us-east-1 until DNS has propagated.
+      s3.client.default.endpoint: s3.us-east-2.amazonaws.com
+      # Relative to the config dir; see extraVolumeMounts below
+      s3.client.default.identity_token_file: aws-irsa/token
+  ## A newly started node only becomes Ready once the cluster is green, so a
+  ## rolling restart waits for shards to recover before restarting the next
+  ## node (the chart default only checks the port is open). After the first
+  ## green, the probe only checks that HTTP responds, so a cluster that later
+  ## goes yellow doesn't pull every node out of the Service.
+  ## Discovery uses the headless service, which includes not-ready pods, so a
+  ## waiting node can still join and recover shards.
+  ## If a rollout stalls because the cluster can't reach green for an
+  ## unrelated reason, see "Rolling restarts" in docs/aws-backups.md.
+  readinessProbe:
+    # null removes the chart's default tcpSocket check (Helm merges maps,
+    # and a probe can only have one handler)
+    tcpSocket: null
+    exec:
+      command:
+        - sh
+        - -c
+        - |
+          START_FILE=/tmp/.opensearch-reached-green
+          if [ -f "$START_FILE" ]; then
+            curl -sf -o /dev/null http://localhost:9200/
+          else
+            curl -sf -o /dev/null 'http://localhost:9200/_cluster/health?wait_for_status=green&timeout=1s' \
+              && touch "$START_FILE"
+          fi
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 3
+  ## IRSA web identity token, mounted inside the config dir so the
+  ## repository-s3 plugin is allowed to read it under the security manager.
+  ## AWS_ROLE_ARN is set in values-uchicago-private.yaml.
+  extraVolumes:
+    - name: aws-irsa-token
+      projected:
+        sources:
+          - serviceAccountToken:
+              audience: sts.amazonaws.com
+              expirationSeconds: 86400
+              path: token
+  extraVolumeMounts:
+    - name: aws-irsa-token
+      mountPath: /usr/share/opensearch/config/aws-irsa
+      readOnly: true

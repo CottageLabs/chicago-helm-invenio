@@ -261,7 +261,22 @@ aws backup list-backup-plans --region us-east-2 \
 
 ### 1.5 Verify
 
-Trigger an on-demand backup of each resource rather than waiting for Sunday:
+The scheduled jobs are the simplest test: the first daily EFS backup runs at
+the next 08:00 UTC, and the first weekly RDS backup the next Sunday at
+08:00 UTC. Check on them with:
+
+```bash
+aws backup list-backup-jobs \
+  --by-backup-vault-name chicago-invenio-backup-vault \
+  --region us-east-2 \
+  --query 'BackupJobs[*].{Resource:ResourceArn,State:State,Created:CreationDate,Pct:PercentDone}' \
+  --output table
+```
+
+To test immediately instead, start on-demand jobs. **Do this outside
+UChicago working hours:** the first EFS backup copies the whole filesystem
+(~720 GB) and takes several hours, and an RDS snapshot of a single-AZ instance
+briefly suspends I/O on the database.
 
 ```bash
 for ARN in \
@@ -274,15 +289,7 @@ for ARN in \
     --lifecycle DeleteAfterDays=7 \
     --region us-east-2
 done
-
-aws backup list-backup-jobs \
-  --by-backup-vault-name chicago-invenio-backup-vault \
-  --region us-east-2 \
-  --query 'BackupJobs[*].{Resource:ResourceArn,State:State,Created:CreationDate,Pct:PercentDone}' \
-  --output table
 ```
-
-The first EFS job will take several hours.
 
 ### 1.6 Optional: Vault Lock
 
@@ -337,9 +344,10 @@ Cross-region copies add data transfer and a second copy of storage.
 
 ## Part 2 — RDS native automated backups
 
-Automated backups were enabled when the instance was created, with 7 days'
-retention and deletion protection on (see `docs/aws-setup.md`). Raise the
-retention to 14 days to match the daily EFS backups:
+Automated backups are enabled when the instance is created (see the RDS
+section of `docs/aws-setup.md`, which uses 14 days' retention and deletion
+protection). Retention is 14 days to match the daily EFS backups. The
+production instance was originally created with 7, and was raised with:
 
 ```bash
 aws rds modify-db-instance --region us-east-2 \
@@ -474,9 +482,9 @@ rm /tmp/opensearch-trust-policy.json /tmp/opensearch-s3-policy.json
 
 ### 3.3 Configure the OpenSearch subchart
 
-In `values-uchicago.yaml` (committed), extend the `opensearch:` section. The
-`opensearch.yml` block **replaces** the one in `charts/invenio/values.yaml`, so
-it repeats the existing lines and adds the two `s3.client.default.*` settings:
+In `values-uchicago.yaml` (committed), the `opensearch:` section is as follows.
+The `opensearch.yml` block **replaces** the one in `charts/invenio/values.yaml`,
+so it repeats the existing lines and adds the `s3.client.default.*` settings.
 
 ```yaml
 opensearch:
@@ -500,10 +508,42 @@ opensearch:
         security:
           disabled: true
       s3.client.default.region: us-east-2
+      # Regional endpoint: the global s3.amazonaws.com endpoint 307-redirects
+      # requests for buckets outside us-east-1 until DNS has propagated.
+      s3.client.default.endpoint: s3.us-east-2.amazonaws.com
       # Relative to the config dir; see extraVolumeMounts below
       s3.client.default.identity_token_file: aws-irsa/token
+  ## A newly started node only becomes Ready once the cluster is green, so a
+  ## rolling restart waits for shards to recover before restarting the next
+  ## node (the chart default only checks the port is open). After the first
+  ## green, the probe only checks that HTTP responds, so a cluster that later
+  ## goes yellow doesn't pull every node out of the Service.
+  ## Discovery uses the headless service, which includes not-ready pods, so a
+  ## waiting node can still join and recover shards.
+  ## If a rollout stalls because the cluster can't reach green for an
+  ## unrelated reason, see "Rolling restarts" in docs/aws-backups.md.
+  readinessProbe:
+    # null removes the chart's default tcpSocket check (Helm merges maps,
+    # and a probe can only have one handler)
+    tcpSocket: null
+    exec:
+      command:
+        - sh
+        - -c
+        - |
+          START_FILE=/tmp/.opensearch-reached-green
+          if [ -f "$START_FILE" ]; then
+            curl -sf -o /dev/null http://localhost:9200/
+          else
+            curl -sf -o /dev/null 'http://localhost:9200/_cluster/health?wait_for_status=green&timeout=1s' \
+              && touch "$START_FILE"
+          fi
+    periodSeconds: 5
+    timeoutSeconds: 5
+    failureThreshold: 3
   ## IRSA web identity token, mounted inside the config dir so the
   ## repository-s3 plugin is allowed to read it under the security manager.
+  ## AWS_ROLE_ARN is set in values-uchicago-private.yaml.
   extraVolumes:
     - name: aws-irsa-token
       projected:
@@ -517,6 +557,25 @@ opensearch:
       mountPath: /usr/share/opensearch/config/aws-irsa
       readOnly: true
 ```
+
+What each part is for:
+
+- `plugins` — installs `repository-s3` when each container starts.
+- `rbac` — creates the `invenio-opensearch` service account, which the IRSA
+  role's trust policy (step 3.2) is scoped to. Without it, pods run as the
+  namespace's `default` service account.
+- `s3.client.default.endpoint` — the plugin otherwise uses the global
+  `s3.amazonaws.com` endpoint, which answers requests for a newly created
+  bucket outside us-east-1 with `307 Temporary Redirect` until DNS has
+  propagated (up to 24 hours). The plugin doesn't follow the redirect, so
+  verification fails with *"Please re-send this request to the specified
+  temporary endpoint"*. The regional endpoint avoids this entirely.
+- `s3.client.default.identity_token_file` + `extraVolumes`/`extraVolumeMounts`
+  — the IRSA token, mounted inside the config directory where the plugin is
+  allowed to read it. Setting at least one IRSA option is also what makes the
+  plugin read `AWS_ROLE_ARN` from the environment.
+- `readinessProbe` — makes rolling restarts wait for `green`; see
+  [Rolling restarts](#rolling-restarts-and-the-readiness-probe) below.
 
 The role ARN contains the account ID, so it goes in
 `values-uchicago-private.yaml` (gitignored). The plugin reads `AWS_ROLE_ARN`
@@ -542,9 +601,24 @@ Notes:
 
 ### 3.4 Roll out
 
-Changing the pod spec restarts the OpenSearch StatefulSet one pod at a time.
-The cluster stays available (every shard has a replica), but check it's
-`green` before starting and let it return to `green` between pods.
+**Check what the upgrade will change first.** The Helm release can lag behind
+the repo (or the cluster can have been changed by hand), so an upgrade may
+apply more than you expect. Compare a server-side dry run against the
+deployed manifest:
+
+```bash
+helm -n invenio get manifest invenio > /tmp/deployed.yaml
+helm upgrade invenio ./charts/invenio -n invenio \
+  -f values-uchicago.yaml -f values-uchicago-private.yaml \
+  --dry-run=server > /tmp/dry-run.txt
+# then diff /tmp/deployed.yaml against the MANIFEST: section of /tmp/dry-run.txt
+```
+
+Use `--dry-run=server`, not `helm template`: `Secret/invenio` uses `lookup`
+to keep its existing values, and `helm template` has no cluster access, so it
+shows every app secret regenerating when a real upgrade wouldn't change them.
+
+Then, with the cluster `green`:
 
 ```bash
 kubectl -n invenio exec invenio-opensearch-master-0 -c opensearch -- \
@@ -556,12 +630,53 @@ helm upgrade invenio ./charts/invenio -n invenio \
 kubectl -n invenio rollout status statefulset/invenio-opensearch-master
 ```
 
-Confirm the plugin is loaded on all three nodes:
+Expect 10–15 minutes for the three nodes. Confirm the plugin is loaded on all
+three:
 
 ```bash
 kubectl -n invenio exec invenio-opensearch-master-0 -c opensearch -- \
   curl -s 'localhost:9200/_cat/plugins?v&h=name,component' | grep repository-s3
 ```
+
+#### Rolling restarts and the readiness probe
+
+The OpenSearch chart's default readiness probe only checks that port 9200 is
+open. During a rolling restart, Kubernetes therefore restarts the next node as
+soon as the previous one opens its port — before its shards have recovered.
+The first rollout of this change hit exactly that: the cluster went `red`
+briefly and was down to two nodes with 163 unassigned replicas when the next
+node was taken down.
+
+The `readinessProbe` in 3.3 fixes this. A newly started container is only
+Ready once the cluster reports `green`; the probe then records that in
+`/tmp/.opensearch-reached-green` and from then on only checks that HTTP
+responds. So:
+
+- a rolling restart waits for `green` between nodes;
+- a running cluster that later goes `yellow` (e.g. a node restarting) doesn't
+  pull every node out of the `invenio-opensearch-master` Service that Invenio
+  connects through;
+- a waiting node can still join the cluster and recover shards, because
+  discovery uses the headless service, which includes not-ready pods.
+
+If a rollout stalls on a node that's `Running` but `0/1` Ready, the cluster
+can't reach `green`. Find out why before forcing it:
+
+```bash
+kubectl -n invenio exec invenio-opensearch-master-0 -c opensearch -- \
+  curl -s 'localhost:9200/_cluster/allocation/explain?pretty'
+```
+
+A common cause is a node's disk passing the 85% low watermark, so replicas
+can't be allocated (see the note on disk usage under *Cost*). Once it's
+understood, the gate can be released by hand on the waiting pod:
+
+```bash
+kubectl -n invenio exec <pod> -c opensearch -- touch /tmp/.opensearch-reached-green
+```
+
+When the security plugin is enabled (the `FIXME` in `opensearch.yml`), the
+probe's `curl` commands will need credentials and HTTPS.
 
 ### 3.5 Register the snapshot repository
 
@@ -826,3 +941,45 @@ slower and incurs a cold-storage restore fee — see
 
 Tag all resources `project=chicago-invenio` (as the commands above do) so they
 appear in the project's Cost Explorer view.
+
+### OpenSearch disk usage
+
+Not a backup cost, but it affects backups: the OpenSearch PVCs are 8Gi each
+and were 57–62% full in September 2026, with the stats indices growing by
+several hundred MB a month. At 85% a node stops receiving new shards, the
+cluster can't get back to `green`, and rolling restarts stall (see 3.4).
+Snapshots of a `yellow` cluster still succeed, since they copy primaries, but
+plan a volume resize (the `gp3` StorageClass allows expansion) before then.
+
+---
+
+## Implementation record
+
+What was actually set up, so the current state can be checked against this
+document. Account-specific values (account ID, role ARNs) are deliberately
+left out.
+
+### 25 September 2026
+
+| Step | Resource | Notes |
+|---|---|---|
+| 1.1 | IAM role `AWSBackupDefaultServiceRole` | With `AWSBackupServiceRolePolicyForBackup` and `…ForRestores`. Created at 14:48 UTC by an earlier draft of this procedure, then kept, as it matches step 1.1 exactly |
+| 1.2 | Backup vault `chicago-invenio-backup-vault` | AWS-managed `aws/backup` KMS key; created at the same time as the role. Vault Lock not enabled |
+| 1.3 | Backup plan `chicago-invenio-efs` (ID `b2dc5093-ca67-42c7-a9d1-4a7189de814e`) | Selection by ARN for `fs-0e8f6bacbcc4515bf`. The earlier draft had also tagged the filesystem `backup=true`; that tag was removed as it isn't used |
+| 1.4 | Backup plan `chicago-invenio-rds` (ID `2d4b1503-f2dc-418b-ad3c-bad8023d2cfc`) | Selection by ARN for `db:chicago-invenio` |
+| 1.5 | — | On-demand test backups deliberately **not** run (set up during UChicago working hours). First scheduled EFS backup due 26 Sep 08:00 UTC; first weekly RDS backup 27 Sep 08:00 UTC |
+| 2 | RDS `chicago-invenio` backup retention 7 → 14 days | `modify-db-instance --apply-immediately`; no restart. The full 14-day window is available from about 9 October 2026 |
+| 3.1 | S3 bucket `chicago-invenio-opensearch-snapshots` | Public access blocked, SSE-S3, tagged |
+| 3.2 | IAM role `chicago-invenio-opensearch-snapshots` | IRSA trust for `system:serviceaccount:invenio:invenio-opensearch`; inline policy `s3-snapshot-repository` |
+| 3.3–3.4 | Helm revision 45 | Plugin, service account, IRSA token and role ARN. Also brought the release in line with `web` HPA `maxReplicas: 6`, which had been applied with `kubectl patch` on 15 Sep after revision 44. The default port-only readiness probe let the rollout restart nodes before shards recovered; the cluster went briefly `red` and recovered to `green` at 15:36 UTC |
+| 3.3–3.4 | Helm revision 46 | Added the regional S3 endpoint (the repository verify in 3.5 had failed with a 307 from the global endpoint) and the wait-for-green readiness probe. Rollout confirmed to hold each new node unready until `green` |
+| 3.5 | Repository `s3-snapshots` (bucket `chicago-invenio-opensearch-snapshots`, base path `invenio-opensearch`) | `_verify` succeeded on all three nodes via IRSA |
+| 3.6 | SM policy `daily-snapshots` | First scheduled snapshot 26 Sep 08:00 UTC |
+| 3.7 | Snapshot `manual-initial` | 232 indices, 232/232 shards, ~3 minutes, 7.4 GB in S3. Not managed by the SM policy: delete it once the scheduled snapshots are running |
+
+Still to do:
+
+- Check the first scheduled runs: EFS (26 Sep), OpenSearch (26 Sep), RDS weekly (27 Sep), with the commands in 1.5 and 3.7.
+- Delete the `manual-initial` snapshot once scheduled snapshots exist.
+- First quarterly test restore of each (Part 4).
+

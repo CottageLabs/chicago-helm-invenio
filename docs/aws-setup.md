@@ -568,7 +568,7 @@ AWS_PROFILE=<your-profile> aws rds create-db-instance \
   --no-publicly-accessible \
   --storage-type gp3 \
   --allocated-storage 20 \
-  --backup-retention-period 7 \
+  --backup-retention-period 14 \
   --deletion-protection \
   --tags Key=project,Value=chicago-invenio Key=Name,Value=chicago-invenio \
   --region us-east-2

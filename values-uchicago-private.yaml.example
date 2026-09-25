@@ -15,3 +15,8 @@ postgresqlExternal:
 redisExternal:
   hostname: <elasticache-endpoint>  # ElastiCache section, step 4
 
+
+opensearch:
+  extraEnvs:
+    - name: AWS_ROLE_ARN  # docs/aws-backups.md, step 3.2
+      value: arn:aws:iam::<aws-account-id>:role/chicago-invenio-opensearch-snapshots
