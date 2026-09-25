@@ -23,7 +23,7 @@ it, or to see why it is the way it is.
 - [aws-monitoring-and-alerting.md](setup/aws-monitoring-and-alerting.md) — CloudWatch Container Insights and alarms
 - [aws-backups.md](setup/aws-backups.md) — backups of the database, uploaded files and statistics
 - [aws-cost-reductions.md](setup/aws-cost-reductions.md) — cost savings made and planned, with the measurements behind them
-- [aws-cloudfront-cache.md](setup/aws-cloudfront-cache.md) — CloudFront in front of the ALB for file downloads (**not yet implemented**)
+- [aws-cloudfront.md](setup/aws-cloudfront.md) — CloudFront in front of the ALB (no caching), to cut data transfer costs
 
 ## [maintenance/](maintenance/)
 

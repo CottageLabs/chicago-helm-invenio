@@ -25,7 +25,7 @@ August 2026, from Cost Explorer (tagged `project=chicago-invenio`):
 |---|---|---|
 | [EFS Infrequent Access tiering](#efs-infrequent-access-tiering) | Done, 25 Sep 2026 | ~$150–170/month |
 | [Correct visitor IP addresses](#correct-visitor-ip-addresses) | Done, 25 Sep 2026 | None directly; fixes rate limiting and stats, and is needed before CloudFront |
-| [CloudFront in front of the ALB](#cloudfront-planned) | Planned | ~$85/month (pay-as-you-go) to ~$135/month (Pro plan) |
+| [CloudFront in front of the ALB](#cloudfront) | Done, 25 Sep 2026 (pay-as-you-go) | ~$85/month (pay-as-you-go) to ~$135/month (Pro plan) |
 | [Compute Savings Plan](#compute-savings-plan-not-pursued) | Not pursued | ~25–30% of EC2 on-demand spend |
 
 ---
@@ -191,7 +191,7 @@ the ALB IP rather than being spoofable.
 
 ---
 
-## CloudFront (planned)
+## CloudFront
 
 The saving comes from pricing, not caching. Data transfer from the ALB to
 CloudFront is free, and CloudFront's own data transfer out is cheaper,
@@ -212,20 +212,19 @@ close to its 10M; requests blocked by the plan's WAF don't count. It requires
 a WAF web ACL on the distribution. Start on pay-as-you-go and move to Pro once
 real CloudFront request numbers are known.
 
-[aws-cloudfront-cache.md](aws-cloudfront-cache.md) needs rewriting before
-use:
+Set up 25 September 2026, on pay-as-you-go. See
+[aws-cloudfront.md](aws-cloudfront.md) for the configuration, the tests run
+before the switch, and rollback. In short:
 
-- **Drop caching** (`CachingDisabled` on every behaviour). It isn't needed for
-  the saving, and caching file downloads risks serving restricted files to
-  the wrong users.
-- **Add `knowledge.uchicago.edu`** as an alternate domain name, with a
-  us-east-1 certificate covering it. `knowledge.uchicago.edu` is a CNAME to
-  `uchicago.cottagelabs.com`, so switching the Route 53 record moves both,
-  but validating the certificate needs a DNS record from UChicago IT.
-- **Change `PROXYFIX_CONFIG` to `x_for: 2`** at the DNS switch (see [above](#correct-visitor-ip-addresses)).
-- **Test** logins, large uploads, downloads, and that stats are still
-  recorded, before switching DNS. Rollback is re-pointing the Route 53 record
-  at the ALB.
+- **No caching** (`CachingDisabled`), so there's no risk of serving a
+  restricted file from a cache.
+- **Both hostnames on one distribution**, with a us-east-1 certificate. It
+  validated using the records UChicago already publish for the ALB's
+  certificate, so no DNS changes were needed at UChicago.
+  `knowledge.uchicago.edu` is a CNAME to `uchicago.cottagelabs.com`, so
+  switching that Route 53 record moved both.
+- **`PROXYFIX_CONFIG` `x_for` raised to 2** (see
+  [above](#correct-visitor-ip-addresses)).
 
 ### Why not Cloudflare
 
