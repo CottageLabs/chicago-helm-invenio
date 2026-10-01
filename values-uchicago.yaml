@@ -248,3 +248,11 @@ opensearch:
     - name: aws-irsa-token
       mountPath: /usr/share/opensearch/config/aws-irsa
       readOnly: true
+  persistence:
+    # Grown from the subchart default (8Gi) on 2026-09-30 by patching the three PVCs.
+    # A StatefulSet's volumeClaimTemplates can't be changed in place, so the first
+    # helm upgrade after changing this needs, beforehand:
+    #   kubectl -n invenio delete statefulset invenio-opensearch-master --cascade=orphan
+    # (keeps the pods and PVCs; helm recreates the StatefulSet with the new template)
+    size: 20Gi
+    storageClass: gp3
