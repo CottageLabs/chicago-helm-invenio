@@ -50,6 +50,8 @@ invenio:
     # x_proto stays 0 so the URL scheme the app sees is unchanged.
     # See docs/setup/aws-cost-reductions.md and docs/setup/aws-cloudfront.md.
     INVENIO_PROXYFIX_CONFIG: '{"x_for": 2, "x_proto": 0}'
+    # Recipient of InvenioRDM admin emails (e.g. file checksum alerts).
+    APP_RDM_ADMIN_EMAIL_RECIPIENT: "sysadmin+chicago@cottagelabs.com"
   extraEnvFrom:
     - secretRef:
         name: invenio-mail-secret
