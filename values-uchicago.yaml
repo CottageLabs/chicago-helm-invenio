@@ -8,7 +8,7 @@ global:
 ## ECR registry and certificate ARN are in values-uchicago-private.yaml (gitignored).
 image:
   repository: chicago-invenio
-  tag: "6230057838f01bfccc9a832a9a8b9bf3f08be8e4"
+  tag: "b1f6b065ecd8d13e3611056da29affe17d9ff59c"
   pullPolicy: Always
 
 ingress:
@@ -26,7 +26,7 @@ ingress:
 
 invenio:
   hostname: knowledge.uchicago.edu
-  init: true
+  init: false
   sysadmin:
     email: sysadmin@cottagelabs.com
     passwordSecret: invenio-sysadmin-secret
@@ -183,6 +183,16 @@ rabbitmqExternal:
 
 opensearch:
   enabled: true
+  ## The subchart default 512M heap ran out serializing large search responses
+  ## (OutOfMemoryError in SearchResponse.toXContent, 2026-10-12), killing the node.
+  ## Keep the heap at ~50% of container memory; the rest is Lucene/off-heap.
+  opensearchJavaOpts: "-Xms1g -Xmx1g"
+  resources:
+    requests:
+      cpu: "1000m"
+      memory: 1.5Gi
+    limits:
+      memory: 2Gi
   ## Install repository-s3 at container start, for snapshots to S3.
   ## See docs/setup/aws-backups.md.
   plugins:
