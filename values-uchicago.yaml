@@ -52,6 +52,12 @@ invenio:
     INVENIO_PROXYFIX_CONFIG: '{"x_for": 2, "x_proto": 0}'
     # Recipient of InvenioRDM admin emails (e.g. file checksum alerts).
     APP_RDM_ADMIN_EMAIL_RECIPIENT: "sysadmin+chicago@cottagelabs.com"
+    # Sentry performance monitoring (APM). Without traces_sample_rate, Sentry
+    # only reports errors. 10% of web requests and Celery tasks are traced,
+    # enough for latency percentiles and slow-query spotting while keeping
+    # within the span quota. This is our APM instead of CloudWatch Application
+    # Signals; see docs/setup/aws-monitoring-and-alerting.md for why.
+    INVENIO_LOGGING_SENTRY_INIT_KWARGS: '{"traces_sample_rate": 0.1}'
   extraEnvFrom:
     - secretRef:
         name: invenio-mail-secret

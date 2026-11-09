@@ -103,8 +103,49 @@ Metrics land in the `ContainerInsights` namespace — see the [full metric
 reference](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Container-Insights-metrics-EKS.html)
 for what's available beyond the two alarms below.
 
-Note this also enables CloudWatch Application Signals (APM) by default,
-which we are not currently using or configured for.
+### Application Signals is disabled
+
+By default the add-on also enables CloudWatch Application Signals (APM). It
+does this by annotating Deployments so that OpenTelemetry is injected into
+every Python process (an init container plus a `PYTHONPATH` sitecustomize).
+**That is incompatible with our uwsgi setup.** OpenTelemetry starts background
+threads in the uwsgi *master*. When the master forks a worker (at startup,
+and again whenever one is recycled on `max-requests`/`reload-on-rss`) while one
+of those threads holds a lock, the worker inherits the lock but not the thread
+that would release it, so it hangs forever in `futex_wait` before loading the
+app. Pods gradually lost all their workers. In Nov 2026 two web pods had sat
+unready for 2 and 15 days, with `uWSGI listen queue ... full` logged every
+second. OpenTelemetry also loaded into every `uwsgi_curl` probe, which cost
+about 300m CPU per pod. Turning it off cut web CPU from ~98% to ~14% of
+requests.
+
+It is switched off in two places (Nov 2026, Helm rev 52):
+
+- the add-on config, so it no longer auto-annotates anything:
+
+  ```bash
+  AWS_PROFILE=<your-profile> aws eks update-addon \
+    --cluster-name chicago-invenio \
+    --addon-name amazon-cloudwatch-observability \
+    --region us-east-2 \
+    --configuration-values '{"manager":{"applicationSignals":{"autoMonitor":{"monitorAllServices":false}}}}'
+  ```
+
+  **Re-apply this if the add-on is ever recreated**, because `create-addon` above
+  doesn't set it.
+- `web.podAnnotations` in `values-uchicago.yaml` sets the
+  `instrumentation.opentelemetry.io/inject-*` annotations to `"false"`. These
+  override the `"true"` values the add-on had already written.
+
+To check that a web pod is clean: its only init container is `copy-web-assets`,
+and `ls /proc/1/task | wc -l` in the `web` container prints 1 (it was 12).
+
+**APM comes from Sentry instead.** Sentry initialises inside each worker after
+the fork (`lazy-apps = true`), so it doesn't have this problem. Performance
+tracing is turned on by `INVENIO_LOGGING_SENTRY_INIT_KWARGS` in
+`values-uchicago.yaml` `invenio.extraConfig`. Getting AWS APM back would mean
+initialising OpenTelemetry per worker after the fork (e.g. a uwsgi `postfork`
+hook in a custom image), not auto-injection.
 
 ---
 
