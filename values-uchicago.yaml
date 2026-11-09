@@ -118,6 +118,34 @@ web:
   startupProbe:
     failureThreshold: 20
     timeoutSeconds: 5
+  ## Restart a web container whose uwsgi has stopped answering, e.g. every
+  ## worker hung so the listen queue is full. Without this a hung pod just sits
+  ## unready forever (two did for 2 and 15 days, Nov 2026). The threshold is
+  ## deliberately loose (~3 min of continuous failure) so a busy pod that is
+  ## merely slow is not killed.
+  livenessProbe:
+    exec:
+      command:
+        - /bin/bash
+        - -c
+        - "uwsgi_curl -X HEAD -H 'Host: {{ include \"invenio.hostname\" $ }}' $(hostname):5000 /ping"
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 6
+    successThreshold: 1
+  ## Opt out of CloudWatch Application Signals auto-instrumentation, which the
+  ## amazon-cloudwatch-observability add-on injects into the pod by default. It
+  ## loads OpenTelemetry into the uwsgi master, whose background threads can hold
+  ## a lock at the moment uwsgi forks a worker; the worker then deadlocks forever
+  ## on startup. Workers are re-forked on max-requests/reload-on-rss, so pods
+  ## gradually lose all their workers. We don't use Application Signals (see
+  ## docs/setup/aws-monitoring-and-alerting.md). Explicit "false" also overrides
+  ## the "true" the add-on already wrote onto the live Deployment.
+  podAnnotations:
+    instrumentation.opentelemetry.io/inject-python: "false"
+    instrumentation.opentelemetry.io/inject-java: "false"
+    instrumentation.opentelemetry.io/inject-nodejs: "false"
+    instrumentation.opentelemetry.io/inject-dotnet: "false"
   resources:
     requests:
       cpu: 500m
